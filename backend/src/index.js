@@ -31,7 +31,17 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: (origin, callback) => {
+  const allowed = [
+    process.env.FRONTEND_URL,
+    'http://localhost:5173',
+  ].filter(Boolean);
+  if (!origin || allowed.some(o => origin.startsWith(o.replace(/\/$/, '')))) {
+    callback(null, true);
+  } else {
+    callback(new Error('Not allowed by CORS'));
+  }
+},
     credentials: true,
   },
 });
@@ -39,7 +49,17 @@ const io = new Server(server, {
 // ── Global middleware ─────────────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+  const allowed = [
+    process.env.FRONTEND_URL,
+    'http://localhost:5173',
+  ].filter(Boolean);
+  if (!origin || allowed.some(o => origin.startsWith(o.replace(/\/$/, '')))) {
+    callback(null, true);
+  } else {
+    callback(new Error('Not allowed by CORS'));
+  }
+},
   credentials: true,
 }));
 app.use(express.json());
