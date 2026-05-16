@@ -52,12 +52,14 @@ function registerPvpHandlers(io, socket) {
     // Don't double-add
     if (q.find(p => p.userId === userId)) return;
     q.push({ userId, username, ccBalance, socketId: socket.id });
+    console.log(`[pvp] ${username} joined queue: ${key} — queue size: ${q.length}`);
 
     socket.emit('pvp:queue:joined', { game, bracket, queue_size: q.length });
 
     // Try to pair
     if (q.length >= 2) {
       const [p1, p2] = q.splice(0, 2);
+      console.log(`[pvp] pairing ${p1.username} vs ${p2.username} for ${game}`);
       createMatch(io, game, p1, p2);
     }
 
