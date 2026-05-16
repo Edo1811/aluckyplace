@@ -3,6 +3,7 @@ import { setUser } from './store.js';
 import { renderLanding }    from './pages/landing.js';
 import { renderHome }       from './pages/home.js';
 import { renderGames }      from './pages/games.js';
+import { renderMatchmaking } from './pages/matchmaking.js';
 import { renderCrash }      from './pages/game-crash.js';
 import { renderBlackjack }  from './pages/game-blackjack.js';
 import { renderSlots }      from './pages/game-slots.js';
@@ -10,6 +11,11 @@ import { renderDice }       from './pages/game-dice.js';
 import { renderMines }      from './pages/game-mines.js';
 import { renderRoulette }   from './pages/game-roulette.js';
 import { renderPlinko }     from './pages/game-plinko.js';
+import { renderCoinflip }   from './pages/game-coinflip.js';
+import { renderRps }        from './pages/game-rps.js';
+import { renderHigherLow }  from './pages/game-higherlow.js';
+import { renderDuels }      from './pages/game-duels.js';
+import { renderUno }        from './pages/game-uno.js';
 
 const app = document.getElementById('app');
 
@@ -31,8 +37,36 @@ if (token && userRaw) {
   renderLanding(app);
 }
 
-// ── Router ────────────────────────────────────────────────────────────────────
-export function navigate(page) {
+// ── Router ─────────────────────────────────────────────────────────────────────
+// matchData is passed from matchmaking → game page
+let pendingMatchData = null;
+
+export function navigate(page, data) {
+  if (data) pendingMatchData = data;
+
+  // Matchmaking routes — format: 'matchmaking-coinflip'
+  if (page.startsWith('matchmaking-')) {
+    const game = page.replace('matchmaking-', '');
+    return renderMatchmaking(app, game, (matchData) => {
+      // Called by matchmaking when pvp:start fires
+      navigate('pvp-' + game, matchData);
+    });
+  }
+
+  // PvP game routes — format: 'pvp-coinflip'
+  if (page.startsWith('pvp-')) {
+    const game = page.replace('pvp-', '');
+    const md   = data || pendingMatchData;
+    pendingMatchData = null;
+    switch (game) {
+      case 'coinflip': return renderCoinflip(app, md);
+      case 'rps':      return renderRps(app, md);
+      case 'highlow':  return renderHigherLow(app, md);
+      case 'duels':    return renderDuels(app, md);
+      case 'uno':      return renderUno(app, md);
+    }
+  }
+
   switch (page) {
     case 'home':           return renderHome(app);
     case 'landing':        return renderLanding(app);
@@ -44,10 +78,7 @@ export function navigate(page) {
     case 'game-mines':     return renderMines(app);
     case 'game-roulette':  return renderRoulette(app);
     case 'game-plinko':    return renderPlinko(app);
-    // Phase 6: pvp games
-    // Phase 7: social, guild
-    // Phase 8: shop
-    default: return renderHome(app);
+    default:               return renderHome(app);
   }
 }
 
