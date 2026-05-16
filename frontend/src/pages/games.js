@@ -21,6 +21,7 @@ let animId = null, cT = 0, cPhase = 'up', cFlash = 0, bjPhase = 0, slotOff = [0,
 const SSYMS = ['7','★','BAR','$','3×'];
 
 export function renderGames(app) {
+  console.log('renderGames called', app);
   app.innerHTML = `
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
     <style>
