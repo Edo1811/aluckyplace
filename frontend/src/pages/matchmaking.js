@@ -129,12 +129,16 @@ export function renderMatchmaking(app, game, onStart) {
     </div>
   `;
 
-  bindUI();
-  bindSocket();
-setTimeout(() => {
+bindUI();
+bindSocket();
+
+// Re-emit auth then join queue once confirmed
+const token = localStorage.getItem('token');
+socket.emit('auth', { token });
+socket.once('auth:ok', () => {
   socket.emit('pvp:queue:join', { game });
   startElapsed();
-}, 600);
+});
 }
 
 function startElapsed() {
