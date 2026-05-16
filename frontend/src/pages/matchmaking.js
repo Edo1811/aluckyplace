@@ -131,8 +131,10 @@ export function renderMatchmaking(app, game, onStart) {
 
   bindUI();
   bindSocket();
+setTimeout(() => {
   socket.emit('pvp:queue:join', { game });
   startElapsed();
+}, 600);
 }
 
 function startElapsed() {
