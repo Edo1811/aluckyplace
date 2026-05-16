@@ -11,6 +11,7 @@ let myBet         = 0;
 let onMatchStart  = null;
 
 export function renderMatchmaking(app, game, onStart) {
+  console.log('renderMatchmaking called', game); // ADD THIS
   currentGame  = game;
   onMatchStart = onStart;
   elapsed      = 0;
