@@ -120,6 +120,7 @@ export function renderGames(app) {
     const btn = e.target.closest('button');
     if (!btn) return;
     const g = GAMES[curIdx];
+    console.log('btn clicked, game:', g.id, 'type:', g.type, 'btn class:', btn.className); // ADD THIS
 
     if (g.type === 'solo') {
       stopAnim();
