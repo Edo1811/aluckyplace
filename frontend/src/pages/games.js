@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 
 const GAMES = [
-  { id:'crash',    name:'Crash',              desc:'Cash out before it crashes.',        type:'solo', anim:'crash',  rules:'A multiplier climbs from 1×. Cash out anytime — stay too long and lose everything. Everyone watches the same graph in real time.', stats:['847','145,200 CC','50,000 CC'], ab:'CR' },
+  { id:'crash',    name:'Crash',              desc:'Cash out before it crashes.',        type:'solo', anim:'crash',  rules:'A multiplier climbs from 1×. Cash out anytime — stay too long and lose everything.', stats:['847','145,200 CC','50,000 CC'], ab:'CR' },
   { id:'blackjack',name:'Blackjack',          desc:'Pick cards, beat the dealer.',       type:'solo', anim:'bj',     rules:'Get closer to 21 than the dealer without going over. Hit, stand, double, or split.', stats:['312','28,400 CC','15,000 CC'], ab:'BJ' },
   { id:'slots',    name:'Slots',              desc:'Spin to win. Probably lose.',        type:'solo', anim:'slots',  rules:'Spin 3 reels and match symbols. Multipliers up to 100×.', stats:['521','89,100 CC','5,000 CC'], ab:'SL' },
   { id:'roulette', name:'Roulette',           desc:'Big swings. Classic.',               type:'solo', anim:'ph',     rules:'Bet on a number, color, or range. European single-zero wheel.', stats:['198','72,000 CC','35,000 CC'], ab:'RL', phc:'#110306' },
@@ -109,11 +109,7 @@ export function renderGames(app) {
   setupCanvas();
   select(0);
 
-  document.getElementById('nav-home').addEventListener('click', () => {
-    stopAnim();
-    window.__navigate('home');
-  });
-
+  document.getElementById('nav-home').addEventListener('click', () => { stopAnim(); window.__navigate('home'); });
   document.getElementById('htpbtn').addEventListener('click', () => {
     htpOpen = !htpOpen;
     document.getElementById('htptxt').classList.toggle('open', htpOpen);
@@ -124,9 +120,20 @@ export function renderGames(app) {
     const btn = e.target.closest('button');
     if (!btn) return;
     const g = GAMES[curIdx];
-    if (g.type === 'pvp') return; // Phase 6
-    stopAnim();
-    window.__navigate('game-' + g.id);
+
+    if (g.type === 'solo') {
+      stopAnim();
+      window.__navigate('game-' + g.id);
+      return;
+    }
+
+    // PvP
+    if (btn.classList.contains('bp')) {
+      // Find Match
+      stopAnim();
+      window.__navigate('matchmaking-' + g.id);
+    }
+    // Play with Friends — Phase 7 (guild context)
   });
 }
 
@@ -175,10 +182,7 @@ function setupCanvas() {
   canvas = document.getElementById('bgc');
   ctx    = canvas.getContext('2d');
   phbg   = document.getElementById('phbg');
-  function resize() {
-    const r = canvas.parentElement.getBoundingClientRect();
-    if (r.width > 0) { canvas.width = r.width; canvas.height = r.height; }
-  }
+  function resize() { const r = canvas.parentElement.getBoundingClientRect(); if (r.width > 0) { canvas.width = r.width; canvas.height = r.height; } }
   resize();
   try { new ResizeObserver(resize).observe(canvas.parentElement); } catch(e) {}
 }
