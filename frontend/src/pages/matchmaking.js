@@ -134,12 +134,12 @@ bindUI();
 bindSocket();
 
 // Re-emit auth then join queue once confirmed
-const token = localStorage.getItem('token');
-socket.emit('auth', { token });
 socket.once('auth:ok', () => {
   socket.emit('pvp:queue:join', { game });
   startElapsed();
 });
+const token = localStorage.getItem('token');
+socket.emit('auth', { token });
 }
 
 function startElapsed() {
