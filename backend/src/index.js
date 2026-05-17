@@ -70,6 +70,9 @@ io.on('connection', (socket) => {
       socket.emit('auth:ok', { user_id: payload.userId, username: payload.username });
       console.log(`[socket] authenticated: ${payload.username}`);
 
+      const pvp = require('./pvp/matchmaking');
+      if (pvp.userSocket) pvp.userSocket.set(payload.userId, socket);
+
       registerCrashHandlers(io, socket);
       registerMinesHandlers(io, socket);
       registerBlackjackHandlers(io, socket);
