@@ -669,6 +669,7 @@ function tryBroadMatch(io, game, userId, bracket) {
 }
 
 module.exports = registerPvpHandlers;
+module.exports.userSocket = userSocket;  // ADD THIS
 module.exports.router = router;
 module.exports.getBracket = getBracket;
 module.exports.capBet = capBet;
