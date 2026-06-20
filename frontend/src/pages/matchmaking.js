@@ -133,13 +133,22 @@ export function renderMatchmaking(app, game, onStart) {
 bindUI();
 bindSocket();
 
-// Re-emit auth then join queue once confirmed
-socket.once('auth:ok', () => {
+// Join the queue. socket.js already authenticates the socket once on
+// connect — we must NOT re-emit 'auth' here. On an already-authenticated
+// socket, the server would re-register every game/pvp handler a second
+// time (see index.js), which is what was breaking matchmaking and the
+// solo games. If the socket somehow isn't authenticated yet (e.g. this
+// page opened before the initial connect/auth handshake finished), wait
+// for the 'auth:ok' that socket.js's own connect flow will produce.
+if (socket.connected && store.isAuthenticated) {
   socket.emit('pvp:queue:join', { game });
   startElapsed();
-});
-const token = localStorage.getItem('token');
-socket.emit('auth', { token });
+} else {
+  socket.once('auth:ok', () => {
+    socket.emit('pvp:queue:join', { game });
+    startElapsed();
+  });
+}
 }
 
 function startElapsed() {
