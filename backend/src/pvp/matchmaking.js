@@ -40,31 +40,40 @@ function registerPvpHandlers(io, socket) {
     if (!socket.user) return;
     const { userId, username } = socket.user;
 
-    const userResult = await query('SELECT cc_balance FROM users WHERE id = $1', [userId]);
-    if (!userResult.rows.length) return;
-    const ccBalance = Number(userResult.rows[0].cc_balance);
-    const bracket   = getBracket(ccBalance);
-    const key       = queueKey(game, bracket);
+    try {
+      const userResult = await query('SELECT cc_balance FROM users WHERE id = $1', [userId]);
+      if (!userResult.rows.length) return;
+      const ccBalance = Number(userResult.rows[0].cc_balance);
+      const bracket   = getBracket(ccBalance);
+      const key       = queueKey(game, bracket);
 
-    if (!queues.has(key)) queues.set(key, []);
-    const q = queues.get(key);
+      if (!queues.has(key)) queues.set(key, []);
+      const q = queues.get(key);
 
-    // Don't double-add
-    if (q.find(p => p.userId === userId)) return;
-    q.push({ userId, username, ccBalance, socketId: socket.id });
-    console.log(`[pvp] ${username} joined queue: ${key} — queue size: ${q.length}`);
+      // Don't double-add
+      if (q.find(p => p.userId === userId)) return;
+      q.push({ userId, username, ccBalance, socketId: socket.id });
+      console.log(`[pvp] ${username} joined queue: ${key} — queue size: ${q.length}`);
 
-    socket.emit('pvp:queue:joined', { game, bracket, queue_size: q.length });
+      socket.emit('pvp:queue:joined', { game, bracket, queue_size: q.length });
 
-    // Try to pair
-    if (q.length >= 2) {
-      const [p1, p2] = q.splice(0, 2);
-      console.log(`[pvp] pairing ${p1.username} vs ${p2.username} for ${game}`);
-      createMatch(io, game, p1, p2);
+      // Try to pair — guard against ever pairing a user with themselves.
+      // (Defense in depth; shouldn't be reachable now that auth is
+      // idempotent, but it was catastrophic when it happened, so if a
+      // duplicate ever slips in, drop it instead of letting the queue stall.)
+      while (q.length >= 2 && q[0].userId === q[1].userId) q.splice(1, 1);
+      if (q.length >= 2) {
+        const [p1, p2] = q.splice(0, 2);
+        console.log(`[pvp] pairing ${p1.username} vs ${p2.username} for ${game}`);
+        createMatch(io, game, p1, p2);
+      }
+
+      // Cross-bracket fallback: if no pair after 15s, try adjacent brackets
+      setTimeout(() => tryBroadMatch(io, game, userId, bracket), 15000);
+    } catch (e) {
+      console.error('[pvp:queue:join]', e.message);
+      socket.emit('pvp:error', { message: 'Server error joining queue' });
     }
-
-    // Cross-bracket fallback: if no pair after 15s, try adjacent brackets
-    setTimeout(() => tryBroadMatch(io, game, userId, bracket), 15000);
   });
 
   // ── LEAVE QUEUE ────────────────────────────────────────────────────────────
@@ -218,8 +227,9 @@ async function lockBets(io, match) {
   match.phase = 'deducting';
 
   // Deduct both bets atomically
-  const client = await getClient();
+  let client;
   try {
+    client = await getClient();
     await client.query('BEGIN');
     const d1 = await client.query(
       `UPDATE users SET cc_balance = cc_balance - $1 WHERE id = $2 AND cc_balance >= $1 RETURNING cc_balance`,
@@ -239,7 +249,9 @@ async function lockBets(io, match) {
     await client.query('COMMIT');
     client.release();
   } catch (e) {
-    await client.query('ROLLBACK'); client.release();
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    if (client) client.release();
+    console.error('[pvp:lockBets]', e.message);
     return abortMatch(io, match, 'error');
   }
 
