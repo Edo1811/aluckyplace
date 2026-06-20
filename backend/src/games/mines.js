@@ -28,7 +28,7 @@ function registerMinesHandlers(io, socket) {
     if (!socket.user) return;
     const userId = socket.user.userId;
     bet = Math.floor(Number(bet));
-    if (bet < 10) return socket.emit('mines:error', { message: 'Minimum bet is 10 CC' });
+    if (!Number.isFinite(bet) || bet < 10) return socket.emit('mines:error', { message: 'Minimum bet is 10 CC' });
     if (activeGames.has(userId)) return socket.emit('mines:error', { message: 'Game already in progress' });
 
     try {
@@ -77,16 +77,26 @@ function registerMinesHandlers(io, socket) {
       game.phase = 'ended';
       activeGames.delete(userId);
 
-      const client = await getClient();
-      await client.query('BEGIN');
-      await recordResult(client, {
-        userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: 0,
-        seed: game.seed, hash: game.hash, nonce: game.nonce,
-        extra: { picks: game.picks, hit_tile: tile_index, bomb_positions: [...game.bombs] },
-      });
-      await client.query('COMMIT');
-      client.release();
+      let client;
+      try {
+        client = await getClient();
+        await client.query('BEGIN');
+        await recordResult(client, {
+          userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: 0,
+          seed: game.seed, hash: game.hash, nonce: game.nonce,
+          extra: { picks: game.picks, hit_tile: tile_index, bomb_positions: [...game.bombs] },
+        });
+        await client.query('COMMIT');
+      } catch (e) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
+        console.error('[mines:pick bomb]', e.message);
+      } finally {
+        if (client) client.release();
+      }
 
+      // The bomb result and bet are already final (bet was taken in
+      // mines:start) — tell the player regardless of whether the history
+      // write above succeeded, so the UI never just hangs waiting.
       socket.emit('mines:bomb', {
         tile_index,
         bomb_positions: [...game.bombs],
@@ -103,26 +113,34 @@ function registerMinesHandlers(io, socket) {
       if (game.picks === GRID_SIZE - BOMB_COUNT) {
         game.phase = 'ended';
         activeGames.delete(userId);
-        const client = await getClient();
-        await client.query('BEGIN');
-        const credit = await client.query(
-          `UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2 RETURNING cc_balance`,
-          [potentialPayout, game.userId]
-        );
-        await recordResult(client, {
-          userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: potentialPayout,
-          seed: game.seed, hash: game.hash, nonce: game.nonce,
-          extra: { picks: game.picks, bomb_positions: [...game.bombs], full_clear: true },
-        });
-        await client.query('COMMIT');
-        client.release();
+        let client;
+        try {
+          client = await getClient();
+          await client.query('BEGIN');
+          const credit = await client.query(
+            `UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2 RETURNING cc_balance`,
+            [potentialPayout, game.userId]
+          );
+          await recordResult(client, {
+            userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: potentialPayout,
+            seed: game.seed, hash: game.hash, nonce: game.nonce,
+            extra: { picks: game.picks, bomb_positions: [...game.bombs], full_clear: true },
+          });
+          await client.query('COMMIT');
 
-        socket.emit('mines:safe', { tile_index, multiplier, potential_payout: potentialPayout });
-        socket.emit('mines:cashout:confirm', {
-          payout: potentialPayout, picks: game.picks,
-          seed: game.seed, bomb_positions: [...game.bombs],
-          cc_balance: credit.rows[0].cc_balance,
-        });
+          socket.emit('mines:safe', { tile_index, multiplier, potential_payout: potentialPayout });
+          socket.emit('mines:cashout:confirm', {
+            payout: potentialPayout, picks: game.picks,
+            seed: game.seed, bomb_positions: [...game.bombs],
+            cc_balance: credit.rows[0].cc_balance,
+          });
+        } catch (e) {
+          if (client) await client.query('ROLLBACK').catch(() => {});
+          console.error('[mines:pick full-clear]', e.message);
+          socket.emit('mines:error', { message: 'Server error while crediting your payout — check your balance and contact support if it looks wrong' });
+        } finally {
+          if (client) client.release();
+        }
         return;
       }
 
@@ -142,8 +160,9 @@ function registerMinesHandlers(io, socket) {
     const multiplier = MULTIPLIERS[game.picks];
     const payout     = Math.floor(game.bet * multiplier);
 
-    const client = await getClient();
+    let client;
     try {
+      client = await getClient();
       await client.query('BEGIN');
       const credit = await client.query(
         `UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2 RETURNING cc_balance`,
@@ -155,7 +174,6 @@ function registerMinesHandlers(io, socket) {
         extra: { picks: game.picks, bomb_positions: [...game.bombs], cashed_out: true },
       });
       await client.query('COMMIT');
-      client.release();
 
       socket.emit('mines:cashout:confirm', {
         payout, picks: game.picks,
@@ -164,9 +182,11 @@ function registerMinesHandlers(io, socket) {
       });
 
     } catch (e) {
-      await client.query('ROLLBACK');
-      client.release();
+      if (client) await client.query('ROLLBACK').catch(() => {});
       console.error('[mines:cashout]', e.message);
+      socket.emit('mines:error', { message: 'Server error during cashout — check your balance and contact support if it looks wrong' });
+    } finally {
+      if (client) client.release();
     }
   });
 }
