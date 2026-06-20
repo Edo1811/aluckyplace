@@ -16,6 +16,7 @@ const convertRoutes = require('./economy/balance');
 const gameRoutes    = require('./games/routes');
 const socialRoutes  = require('./social/leaderboard');
 const shopRoutes    = require('./shop/listings');
+const cosmeticRoutes = require('./shop/cosmetics');
 
 // ── Socket handlers ───────────────────────────────────────────────────────────
 const registerCrashHandlers     = require('./games/crash');
@@ -66,6 +67,7 @@ app.use('/convert', convertRoutes);
 app.use('/games',   gameRoutes);
 app.use('/social',  socialRoutes);
 app.use('/shop',    shopRoutes);
+app.use('/cosmetics', cosmeticRoutes);
 
 // ── Socket.io ─────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
