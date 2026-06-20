@@ -298,8 +298,8 @@ function bindUI() {
 
 function sendChat() {
   const inp = document.getElementById('chatInp');
-  if (!inp || !inp.value.trim() || !roundId) return;
-  socket.emit('crash:chat', { round_id: roundId, text: inp.value.trim() });
+  if (!inp || !inp.value.trim()) return;
+  socket.emit('crash:chat', { text: inp.value.trim() });
   inp.value = '';
 }
 
