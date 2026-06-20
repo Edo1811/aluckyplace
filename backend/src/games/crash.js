@@ -88,8 +88,9 @@ async function endRound() {
     if (!bet.cashedOut) {
       // Loss — already deducted, nothing to do
       // Record result
+      let client;
       try {
-        const client = await getClient();
+        client = await getClient();
         await client.query('BEGIN');
         await recordResult(client, {
           userId, game: 'crash', betAmount: bet.amount, payoutAmount: 0,
@@ -97,8 +98,12 @@ async function endRound() {
           extra: { crash_point: crashedAt, cashed_out: false },
         });
         await client.query('COMMIT');
-        client.release();
-      } catch (e) { console.error('[crash] record loss:', e.message); }
+      } catch (e) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
+        console.error('[crash] record loss:', e.message);
+      } finally {
+        if (client) client.release();
+      }
     }
   }
 
@@ -130,7 +135,7 @@ function registerCrashHandlers(io, socket) {
     const userId   = socket.user.userId;
     const username = socket.user.username;
     const bet      = Math.floor(Number(amount));
-    if (bet < 10) return socket.emit('crash:error', { message: 'Minimum bet is 10 CC' });
+    if (!Number.isFinite(bet) || bet < 10) return socket.emit('crash:error', { message: 'Minimum bet is 10 CC' });
     if (gameState.bets[userId]) return socket.emit('crash:error', { message: 'Already bet this round' });
 
     try {
@@ -161,27 +166,32 @@ function registerCrashHandlers(io, socket) {
 
     try {
       const client = await getClient();
-      await client.query('BEGIN');
-      const credit = await client.query(
-        `UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2 RETURNING cc_balance`,
-        [payout, userId]
-      );
-      await recordResult(client, {
-        userId, game: 'crash', betAmount: bet.amount, payoutAmount: payout,
-        seed: gameState.seed, hash: gameState.hash, nonce: 0,
-        extra: { cashout_multiplier: parseFloat(mult.toFixed(2)), crash_point: gameState.crashPoint, cashed_out: true },
-      });
-      await client.query('COMMIT');
-      client.release();
+      try {
+        await client.query('BEGIN');
+        const credit = await client.query(
+          `UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2 RETURNING cc_balance`,
+          [payout, userId]
+        );
+        await recordResult(client, {
+          userId, game: 'crash', betAmount: bet.amount, payoutAmount: payout,
+          seed: gameState.seed, hash: gameState.hash, nonce: 0,
+          extra: { cashout_multiplier: parseFloat(mult.toFixed(2)), crash_point: gameState.crashPoint, cashed_out: true },
+        });
+        await client.query('COMMIT');
 
-      socket.emit('crash:cashout:confirm', { round_id, multiplier: parseFloat(mult.toFixed(2)), payout, cc_balance: credit.rows[0].cc_balance });
-      io.to('crash').emit('crash:cashout:broadcast', { username: bet.username, multiplier: parseFloat(mult.toFixed(2)), payout });
+        socket.emit('crash:cashout:confirm', { round_id, multiplier: parseFloat(mult.toFixed(2)), payout, cc_balance: credit.rows[0].cc_balance });
+        io.to('crash').emit('crash:cashout:broadcast', { username: bet.username, multiplier: parseFloat(mult.toFixed(2)), payout });
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
     } catch (e) { console.error('[crash] cashout error:', e.message); }
   });
 
-  socket.on('crash:chat', ({ round_id, text }) => {
+  socket.on('crash:chat', ({ text }) => {
     if (!socket.user || !text) return;
-    if (round_id !== gameState.roundId) return;
     const msg = { username: socket.user.username, text: String(text).slice(0, 200), ts: Date.now() };
     gameState.chat.push(msg);
     io.to('crash').emit('crash:chat:message', msg);
