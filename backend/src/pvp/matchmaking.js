@@ -205,14 +205,14 @@ function createMatch(io, game, p1, p2) {
   if (s1) s1.emit('pvp:matched', { match_id: matchId, opponent: { username: p2.username, cc_balance: p2.ccBalance } });
   if (s2) s2.emit('pvp:matched', { match_id: matchId, opponent: { username: p1.username, cc_balance: p1.ccBalance } });
 
-  // 10s betting timer
+  // 30s betting timer
   match.bettingTimer = setTimeout(() => {
     if (matches.get(matchId)?.phase === 'betting') {
       endMatch(match, null, 'timeout');
       if (s1) s1.emit('pvp:timeout', { match_id: matchId });
       if (s2) s2.emit('pvp:timeout', { match_id: matchId });
     }
-  }, 10000);
+  }, 30000);
 }
 
 function broadcastBettingState(io, match) {
@@ -287,7 +287,7 @@ function startGame(io, match) {
     if (s1) s1.emit('pvp:start', { match_id: matchId, game, your_role: match.state.p1role, pot: match.pot, hash });
     if (s2) s2.emit('pvp:start', { match_id: matchId, game, your_role: match.state.p2role, pot: match.pot, hash });
     // Auto-resolve coinflip
-    setTimeout(() => resolveCoinflip(io, match), 2000);
+    setTimeout(() => resolveCoinflip(io, match), 4500);
     return;
   }
 
