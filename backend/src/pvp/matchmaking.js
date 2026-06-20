@@ -68,7 +68,9 @@ function registerPvpHandlers(io, socket) {
         createMatch(io, game, p1, p2);
       }
 
-      // Cross-bracket fallback: if no pair after 15s, try adjacent brackets
+      // Broaden fallback: if no pair after 15s, try adjacent brackets, then
+      // anyone anywhere by nearest balance, retrying until matched (see
+      // tryBroadMatch).
       setTimeout(() => tryBroadMatch(io, game, userId, bracket), 15000);
     } catch (e) {
       console.error('[pvp:queue:join]', e.message);
@@ -659,12 +661,15 @@ function removeFromAllQueues(userId) {
 }
 
 function tryBroadMatch(io, game, userId, bracket) {
-  // Check if still in queue
+  // Stop here if this player has already left the queue (or got matched)
+  // by some other path — this is also what naturally ends the 5s retry
+  // chain in step 3 below once the player leaves/disconnects.
   const key = queueKey(game, bracket);
   const q   = queues.get(key) || [];
   if (!q.find(p => p.userId === userId)) return;
 
-  // Try adjacent brackets
+  // 1) Adjacent brackets first — keeps matches fair when there's enough
+  // population to support it.
   for (const b of [bracket - 1, bracket + 1]) {
     if (b < 1 || b > 6) continue;
     const adjKey = queueKey(game, b);
@@ -674,10 +679,48 @@ function tryBroadMatch(io, game, userId, bracket) {
       if (myIdx === -1) return;
       const me   = q.splice(myIdx, 1)[0];
       const them = adjQ.splice(0, 1)[0];
+      console.log(`[pvp] broad-matched ${me.username} vs ${them.username} (adjacent bracket) for ${game}`);
       createMatch(io, game, me, them);
       return;
     }
   }
+
+  // 2) Nobody adjacent — pair instantly with whoever, anywhere, has the
+  // closest CC balance. No extra delay; treated like a same-bracket match.
+  if (tryGlobalMatch(io, game, userId)) return;
+
+  // 3) Still nobody queued for this game at all — keep checking every 5s
+  // until someone else queues up. If this player leaves the queue or
+  // disconnects, removeFromAllQueues() takes them out of `queues`, so the
+  // check at the top of the next tick stops this chain on its own.
+  setTimeout(() => tryBroadMatch(io, game, userId, bracket), 5000);
+}
+
+function tryGlobalMatch(io, game, userId) {
+  let me = null, myBracket = null, myIdx = -1;
+  for (let b = 1; b <= 6; b++) {
+    const q = queues.get(queueKey(game, b)) || [];
+    const idx = q.findIndex(p => p.userId === userId);
+    if (idx !== -1) { me = q[idx]; myBracket = b; myIdx = idx; break; }
+  }
+  if (!me) return false; // already left the queue, or already matched
+
+  let bestBracket = null, bestIdx = -1, bestDiff = Infinity;
+  for (let b = 1; b <= 6; b++) {
+    const q = queues.get(queueKey(game, b)) || [];
+    for (let i = 0; i < q.length; i++) {
+      if (b === myBracket && i === myIdx) continue; // skip self
+      const diff = Math.abs(q[i].ccBalance - me.ccBalance);
+      if (diff < bestDiff) { bestDiff = diff; bestBracket = b; bestIdx = i; }
+    }
+  }
+  if (bestBracket === null) return false;
+
+  queues.get(queueKey(game, myBracket)).splice(myIdx, 1);
+  const them = queues.get(queueKey(game, bestBracket)).splice(bestIdx, 1)[0];
+  console.log(`[pvp] broad-matched ${me.username} vs ${them.username} (nearest balance, global) for ${game}`);
+  createMatch(io, game, me, them);
+  return true;
 }
 
 module.exports = registerPvpHandlers;
