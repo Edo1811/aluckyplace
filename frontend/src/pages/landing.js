@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { setUser } from '../store.js';
+import socket from '../socket.js';
 
 export function renderLanding(app) {
   app.innerHTML = `
@@ -214,7 +215,6 @@ export function renderLanding(app) {
 
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      import socket from '../socket.js'; // add at top if not there
       socket.emit('auth', { token: data.token });
       setUser(data.user);
       window.__navigate('home');
