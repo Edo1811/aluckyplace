@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { query, getClient } = require('../db');
 const { requireAuth } = require('../auth/middleware');
+const { recordDailyStreak } = require('../progression');
 
 // Reward table from balance.md — index 0 = Day 1
 const DAILY_REWARDS = [100, 200, 250, 300, 400, 500, 750, 800, 1000];
@@ -124,6 +125,8 @@ router.post('/claim', requireAuth, async (req, res) => {
              last_claimed_at = NOW()`,
       [userId, new_streak]
     );
+
+    await recordDailyStreak(client, userId, new_streak);
 
     await client.query('COMMIT');
 

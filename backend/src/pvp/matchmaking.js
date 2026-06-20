@@ -1,6 +1,7 @@
 const { query, getClient } = require('../db');
 const { redis } = require('../redis');
 const { v4: uuidv4 } = require('uuid');
+const { recordPvpResult } = require('../progression');
 
 const router = require('express').Router();
 
@@ -607,12 +608,31 @@ async function awardWinner(io, match, winnerId) {
   if (match.phase === 'ended') return;
   match.phase = 'ended';
 
-  const { matchId, player1, player2, pot, seed } = match;
+  const { matchId, player1, player2, pot, seed, hash, game, bet1, bet2 } = match;
   const loserId = player1.userId === winnerId ? player2.userId : player1.userId;
 
   try {
     await query(`UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2`, [pot, winnerId]);
   } catch (e) { console.error('[pvp] award winner:', e.message); }
+
+  // Persist match history + progression (architecture invariant — pvp_matches
+  // was never being written before this).
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO pvp_matches (game, player1_id, player2_id, bet_p1, bet_p2, pot, winner_id, server_seed, server_hash, completed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())`,
+      [game, player1.userId, player2.userId, bet1, bet2, pot, winnerId, seed, hash]
+    );
+    await recordPvpResult(client, match, winnerId, loserId);
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[pvp] record match/progression:', e.message);
+  } finally {
+    client.release();
+  }
 
   const s1 = userSocket.get(player1.userId);
   const s2 = userSocket.get(player2.userId);
@@ -628,8 +648,30 @@ async function autoWin(io, match, winnerId) {
   const { matchId } = match;
   match.phase = 'ended';
 
-  const { player1, player2, pot } = match;
+  const { player1, player2, pot, game, bet1, bet2, seed, hash } = match;
   if (pot) await query(`UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2`, [pot, winnerId]).catch(() => {});
+
+  // Only a real match (bets locked, game started) is worth recording —
+  // disconnects during the betting/queue phase never reached that point.
+  if (pot && seed) {
+    const loserId = player1.userId === winnerId ? player2.userId : player1.userId;
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO pvp_matches (game, player1_id, player2_id, bet_p1, bet_p2, pot, winner_id, server_seed, server_hash, extra, completed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())`,
+        [game, player1.userId, player2.userId, bet1, bet2, pot, winnerId, seed, hash, JSON.stringify({ auto_win: true })]
+      );
+      await recordPvpResult(client, match, winnerId, loserId);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[pvp] record auto-win match/progression:', e.message);
+    } finally {
+      client.release();
+    }
+  }
 
   const ws = userSocket.get(winnerId);
   if (ws) ws.emit('pvp:auto_win', { match_id: matchId, pot: pot || 0, reason: 'opponent_disconnected' });

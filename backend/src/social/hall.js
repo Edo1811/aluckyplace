@@ -13,6 +13,13 @@
 //
 // Entries are auto-generated with template story text.
 // hos_opted_out users are filtered at query time + removed nightly.
+//
+// TODO (Phase 7 progression hooks, see backend/src/progression/index.js):
+//   - When an HOF entry is created: unlockAchievement(client, userId, 18)  // Hall of Fame
+//   - When an HOS entry is created: unlockAchievement(client, userId, 17)  // Hall of Shame
+//   - Top 10 (achievement 4) and Leaderboard Climber (challenge 17) belong
+//     wherever leaderboard rank is computed (leaderboard.js), not here —
+//     they trigger off rank crossing into the top 10, not an HOF/HOS event.
 
 async function checkHofTriggers(_userId, _context) {
   // Phase 7

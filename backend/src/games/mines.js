@@ -1,5 +1,6 @@
 const { generateSeed, deriveFloats, nextNonce, recordResult } = require('./provably-fair');
 const { getClient, query } = require('../db');
+const { recordSoloResult } = require('../progression');
 
 const GRID_SIZE = 25;
 const BOMB_COUNT = 5;
@@ -86,6 +87,11 @@ function registerMinesHandlers(io, socket) {
           seed: game.seed, hash: game.hash, nonce: game.nonce,
           extra: { picks: game.picks, hit_tile: tile_index, bomb_positions: [...game.bombs] },
         });
+        await recordSoloResult(client, {
+          userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: 0,
+          ccBalanceAfter: game.cc_balance,
+          extra: { picks: game.picks },
+        });
         await client.query('COMMIT');
       } catch (e) {
         if (client) await client.query('ROLLBACK').catch(() => {});
@@ -125,6 +131,11 @@ function registerMinesHandlers(io, socket) {
             userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: potentialPayout,
             seed: game.seed, hash: game.hash, nonce: game.nonce,
             extra: { picks: game.picks, bomb_positions: [...game.bombs], full_clear: true },
+          });
+          await recordSoloResult(client, {
+            userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: potentialPayout,
+            ccBalanceAfter: credit.rows[0].cc_balance,
+            extra: { picks: game.picks, full_clear: true },
           });
           await client.query('COMMIT');
 
@@ -172,6 +183,11 @@ function registerMinesHandlers(io, socket) {
         userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: payout,
         seed: game.seed, hash: game.hash, nonce: game.nonce,
         extra: { picks: game.picks, bomb_positions: [...game.bombs], cashed_out: true },
+      });
+      await recordSoloResult(client, {
+        userId: game.userId, game: 'mines', betAmount: game.bet, payoutAmount: payout,
+        ccBalanceAfter: credit.rows[0].cc_balance,
+        extra: { picks: game.picks },
       });
       await client.query('COMMIT');
 

@@ -1,5 +1,6 @@
 const { generateSeed, deriveFloats, nextNonce, recordResult } = require('./provably-fair');
 const { getClient } = require('../db');
+const { recordSoloResult } = require('../progression');
 
 // Symbol frequencies tuned for ~92% RTP against pay table
 // Higher index = more common
@@ -77,6 +78,11 @@ async function spin(userId, betAmount) {
     await recordResult(client, {
       userId, game: 'slots', betAmount, payoutAmount: payout, seed, hash, nonce,
       extra: { reels, multiplier, nearMiss },
+    });
+
+    await recordSoloResult(client, {
+      userId, game: 'slots', betAmount, payoutAmount: payout, ccBalanceAfter: finalBalance,
+      extra: { jackpot: multiplier === 100 },
     });
 
     await client.query('COMMIT');

@@ -1,5 +1,6 @@
 const { generateSeed, deriveFloat, nextNonce, recordResult } = require('./provably-fair');
 const { getClient } = require('../db');
+const { recordSoloResult } = require('../progression');
 
 const HOUSE_EDGE = 0.01;
 
@@ -27,7 +28,7 @@ async function roll(userId, betAmount, direction, threshold) {
   const roll  = Math.floor(raw * 100) + 1;         // 1–100
 
   const win = direction === 'over' ? roll > threshold : roll < threshold;
-  const { multiplier } = calcPayout(direction, threshold);
+  const { pWin, multiplier } = calcPayout(direction, threshold);
   const payout = win ? Math.floor(betAmount * multiplier) : 0;
   const net    = payout - betAmount;
 
@@ -58,6 +59,11 @@ async function roll(userId, betAmount, direction, threshold) {
     await recordResult(client, {
       userId, game: 'dice', betAmount, payoutAmount: payout, seed, hash, nonce,
       extra: { roll, direction, threshold, multiplier: multiplier.toFixed(4), win },
+    });
+
+    await recordSoloResult(client, {
+      userId, game: 'dice', betAmount, payoutAmount: payout, ccBalanceAfter: finalBalance,
+      extra: { pWin, win },
     });
 
     await client.query('COMMIT');

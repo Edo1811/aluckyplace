@@ -1,5 +1,6 @@
 const { generateSeed, deriveFloats, nextNonce, recordResult } = require('./provably-fair');
 const { getClient, query } = require('../db');
+const { recordSoloResult } = require('../progression');
 
 // Active games: userId -> gameState
 const activeGames = new Map();
@@ -273,6 +274,9 @@ async function settleGame(socket, game, reason) {
       userId, game: 'blackjack', betAmount: bet, payoutAmount: totalPayout,
       seed, hash, nonce,
       extra: { results: results.map(r => ({ outcome: r.outcome, total: r.total, payout: r.payout })), dealer_total: dealerTotal },
+    });
+    await recordSoloResult(client, {
+      userId, game: 'blackjack', betAmount: bet, payoutAmount: totalPayout, ccBalanceAfter: finalBalance,
     });
     await client.query('COMMIT');
     client.release();

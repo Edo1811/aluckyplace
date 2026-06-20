@@ -1,5 +1,6 @@
 const { generateSeed, deriveFloats, nextNonce, recordResult } = require('./provably-fair');
 const { getClient } = require('../db');
+const { recordSoloResult } = require('../progression');
 
 const SLOT_MULTIPLIERS = [250, 30, 6, 2, 0.5, 0.3, 0.2, 0.3, 0.5, 2, 6, 30, 250];
 const ROWS = 12;
@@ -49,6 +50,10 @@ async function drop(userId, betAmount) {
     await recordResult(client, {
       userId, game: 'plinko', betAmount, payoutAmount: payout, seed, hash, nonce,
       extra: { slot, multiplier, path },
+    });
+
+    await recordSoloResult(client, {
+      userId, game: 'plinko', betAmount, payoutAmount: payout, ccBalanceAfter: finalBalance,
     });
 
     await client.query('COMMIT');

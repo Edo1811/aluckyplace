@@ -1,5 +1,6 @@
 const { generateSeed, deriveFloat, recordResult } = require('./provably-fair');
 const { query, getClient } = require('../db');
+const { recordSoloResult } = require('../progression');
 
 // crash_point = max(1.00, 0.99 / (1 - h))
 function calcCrashPoint(h) {
@@ -97,6 +98,11 @@ async function endRound() {
           seed: gameState.seed, hash: gameState.hash, nonce: 0,
           extra: { crash_point: crashedAt, cashed_out: false },
         });
+        const balRes = await client.query(`SELECT cc_balance FROM users WHERE id = $1`, [userId]);
+        await recordSoloResult(client, {
+          userId, game: 'crash', betAmount: bet.amount, payoutAmount: 0,
+          ccBalanceAfter: balRes.rows[0]?.cc_balance ?? 0,
+        });
         await client.query('COMMIT');
       } catch (e) {
         if (client) await client.query('ROLLBACK').catch(() => {});
@@ -176,6 +182,11 @@ function registerCrashHandlers(io, socket) {
           userId, game: 'crash', betAmount: bet.amount, payoutAmount: payout,
           seed: gameState.seed, hash: gameState.hash, nonce: 0,
           extra: { cashout_multiplier: parseFloat(mult.toFixed(2)), crash_point: gameState.crashPoint, cashed_out: true },
+        });
+        await recordSoloResult(client, {
+          userId, game: 'crash', betAmount: bet.amount, payoutAmount: payout,
+          ccBalanceAfter: credit.rows[0].cc_balance,
+          extra: { cashout_multiplier: parseFloat(mult.toFixed(2)) },
         });
         await client.query('COMMIT');
 

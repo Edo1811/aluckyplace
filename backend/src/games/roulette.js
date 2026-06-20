@@ -1,5 +1,6 @@
 const { generateSeed, deriveFloat, nextNonce, recordResult } = require('./provably-fair');
 const { getClient } = require('../db');
+const { recordSoloResult } = require('../progression');
 
 // European roulette — numbers 0–36
 const RED_NUMBERS = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
@@ -103,6 +104,10 @@ async function spin(userId, bets) {
     await recordResult(client, {
       userId, game: 'roulette', betAmount: totalBet, payoutAmount: totalPayout,
       seed, hash, nonce, extra: { result, color: numberToColor(result), bets: evaluated },
+    });
+
+    await recordSoloResult(client, {
+      userId, game: 'roulette', betAmount: totalBet, payoutAmount: totalPayout, ccBalanceAfter: finalBalance,
     });
 
     await client.query('COMMIT');
