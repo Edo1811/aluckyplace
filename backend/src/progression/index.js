@@ -91,12 +91,12 @@ async function bumpChallengeProgress(client, userId, challengeId, newProgress) {
 
   await client.query(
     `INSERT INTO challenges (user_id, challenge_id, progress, completed_at)
-     VALUES ($1, $2, $3, CASE WHEN $3 >= $4 THEN NOW() ELSE NULL END)
+     VALUES ($1, $2, $3::int, CASE WHEN $3::int >= $4::int THEN NOW() ELSE NULL END)
      ON CONFLICT (user_id, challenge_id) DO UPDATE SET
-       progress = GREATEST(challenges.progress, $3),
+       progress = GREATEST(challenges.progress, $3::int),
        completed_at = CASE
          WHEN challenges.completed_at IS NOT NULL THEN challenges.completed_at
-         WHEN GREATEST(challenges.progress, $3) >= $4 THEN NOW()
+         WHEN GREATEST(challenges.progress, $3::int) >= $4::int THEN NOW()
          ELSE NULL
        END`,
     [userId, challengeId, capped, target]
@@ -115,8 +115,8 @@ async function bumpSoloStats(client, userId, { won, net }) {
     `UPDATE user_stats SET
        total_games  = total_games + 1,
        total_wins   = total_wins + CASE WHEN $2 THEN 1 ELSE 0 END,
-       biggest_win  = GREATEST(biggest_win,  CASE WHEN $3 > 0 THEN $3  ELSE 0 END),
-       biggest_loss = GREATEST(biggest_loss, CASE WHEN $3 < 0 THEN -$3 ELSE 0 END),
+       biggest_win  = GREATEST(biggest_win,  CASE WHEN $3::bigint > 0 THEN $3::bigint        ELSE 0 END),
+       biggest_loss = GREATEST(biggest_loss, CASE WHEN $3::bigint < 0 THEN -($3::bigint) ELSE 0 END),
        updated_at   = NOW()
      WHERE user_id = $1
      RETURNING total_games, total_wins, biggest_win, biggest_loss, bankruptcy_count`,
