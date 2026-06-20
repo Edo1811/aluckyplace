@@ -24,6 +24,17 @@ const registerBlackjackHandlers = require('./games/blackjack');
 const registerPvpHandlers       = require('./pvp/matchmaking');
 const registerGuildHandlers     = require('./social/guilds');
 
+// ── Safety net ────────────────────────────────────────────────────────────────
+// Node kills the whole process on an unhandled rejection by default. Several
+// socket handlers do async DB work — this is a backstop so a future missed
+// try/catch degrades to a logged error instead of taking every player down.
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL-AVOIDED] Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL-AVOIDED] Uncaught exception:', err);
+});
+
 const app    = express();
 const server = http.createServer(app);
 
@@ -59,6 +70,14 @@ app.use('/shop',    shopRoutes);
 // ── Socket.io ─────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   socket.on('auth', ({ token } = {}) => {
+    // Already authenticated on this socket — don't re-run registration.
+    // (Several frontend pages re-emit 'auth' defensively; without this guard
+    // every re-emit would stack a brand new set of game/pvp listeners on the
+    // same socket, causing every click to fire multiple times.)
+    if (socket.user) {
+      return socket.emit('auth:ok', { user_id: socket.user.userId, username: socket.user.username });
+    }
+
     if (!token) {
       socket.emit('auth:error', { message: 'No token provided' });
       return socket.disconnect(true);
