@@ -6,7 +6,7 @@ let matchId       = null;
 let elapsed       = 0;
 let elapsedTimer  = null;
 let cdTimer       = null;
-let cdVal         = 10;
+let cdVal         = 30;
 let myBet         = 0;
 let onMatchStart  = null;
 
@@ -121,7 +121,7 @@ export function renderMatchmaking(app, game, onStart) {
           <button class="ready-btn" id="readyBtn" disabled>Ready</button>
         </div>
         <div class="cd-row">
-          <div class="cd-num" id="cdNum">10</div>
+          <div class="cd-num" id="cdNum">30</div>
           <div class="cd-lbl" id="cdLbl">seconds to place your bet</div>
         </div>
       </div>
@@ -180,12 +180,12 @@ function showNotif(msg, type = 'yellow') {
 }
 
 function startCd() {
-  cdVal = 10;
+  cdVal = 30;
   clearInterval(cdTimer);
   cdTimer = setInterval(() => {
     cdVal--;
     const el = document.getElementById('cdNum');
-    if (el) { el.textContent = cdVal; el.className = 'cd-num' + (cdVal <= 3 ? ' bad' : ''); }
+    if (el) { el.textContent = cdVal; el.className = 'cd-num' + (cdVal <= 5 ? ' bad' : ''); }
     if (cdVal <= 0) clearInterval(cdTimer);
   }, 1000);
 }
