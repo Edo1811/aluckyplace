@@ -73,7 +73,7 @@ function registerBlackjackHandlers(io, socket) {
     if (!socket.user) return;
     const userId = socket.user.userId;
     bet = Math.floor(Number(bet));
-    if (bet < 10) return socket.emit('blackjack:error', { message: 'Minimum bet is 10 CC' });
+    if (!Number.isFinite(bet) || bet < 10) return socket.emit('blackjack:error', { message: 'Minimum bet is 10 CC' });
     if (activeGames.has(userId)) return socket.emit('blackjack:error', { message: 'Game already in progress' });
 
     try {
@@ -144,61 +144,66 @@ function registerBlackjackHandlers(io, socket) {
     const hand   = game.playerHands[game.activeHandIdx];
     const draw   = () => game.shoe[game.idx++];
 
-    if (action === 'hit') {
-      hand.push(draw());
-      const total = handTotal(hand);
+    try {
+      if (action === 'hit') {
+        hand.push(draw());
+        const total = handTotal(hand);
 
-      if (total > 21) {
-        // Bust this hand
-        const morHands = game.activeHandIdx < game.playerHands.length - 1;
-        if (morHands) {
+        if (total > 21) {
+          // Bust this hand
+          const morHands = game.activeHandIdx < game.playerHands.length - 1;
+          if (morHands) {
+            game.activeHandIdx++;
+            emitState(socket, game);
+          } else {
+            await settleGame(socket, game, 'resolve');
+          }
+        } else {
+          emitState(socket, game);
+        }
+
+      } else if (action === 'stand') {
+        const moreHands = game.activeHandIdx < game.playerHands.length - 1;
+        if (moreHands) {
           game.activeHandIdx++;
           emitState(socket, game);
         } else {
           await settleGame(socket, game, 'resolve');
         }
-      } else {
-        emitState(socket, game);
-      }
 
-    } else if (action === 'stand') {
-      const moreHands = game.activeHandIdx < game.playerHands.length - 1;
-      if (moreHands) {
-        game.activeHandIdx++;
-        emitState(socket, game);
-      } else {
+      } else if (action === 'double') {
+        if (hand.length !== 2) return;
+        // Deduct extra bet
+        const extra = await query(
+          `UPDATE users SET cc_balance = cc_balance - $1 WHERE id = $2 AND cc_balance >= $1 RETURNING cc_balance`,
+          [game.bet, userId]
+        );
+        if (extra.rows.length === 0) return socket.emit('blackjack:error', { message: 'Insufficient balance for double' });
+        game.bet *= 2;
+        game.cc_balance = extra.rows[0].cc_balance;
+        hand.push(draw());
         await settleGame(socket, game, 'resolve');
+
+      } else if (action === 'split') {
+        if (hand.length !== 2 || hand[0].rank !== hand[1].rank || game.splitCount >= 2) return;
+        // Deduct extra bet
+        const extra = await query(
+          `UPDATE users SET cc_balance = cc_balance - $1 WHERE id = $2 AND cc_balance >= $1 RETURNING cc_balance`,
+          [game.bet, userId]
+        );
+        if (extra.rows.length === 0) return socket.emit('blackjack:error', { message: 'Insufficient balance for split' });
+        game.cc_balance = extra.rows[0].cc_balance;
+        game.splitCount++;
+        // Split the hand
+        const newHand = [hand.pop()];
+        hand.push(draw());
+        newHand.push(draw());
+        game.playerHands.splice(game.activeHandIdx + 1, 0, newHand);
+        emitState(socket, game);
       }
-
-    } else if (action === 'double') {
-      if (hand.length !== 2) return;
-      // Deduct extra bet
-      const extra = await query(
-        `UPDATE users SET cc_balance = cc_balance - $1 WHERE id = $2 AND cc_balance >= $1 RETURNING cc_balance`,
-        [game.bet, userId]
-      );
-      if (extra.rows.length === 0) return socket.emit('blackjack:error', { message: 'Insufficient balance for double' });
-      game.bet *= 2;
-      game.cc_balance = extra.rows[0].cc_balance;
-      hand.push(draw());
-      await settleGame(socket, game, 'resolve');
-
-    } else if (action === 'split') {
-      if (hand.length !== 2 || hand[0].rank !== hand[1].rank || game.splitCount >= 2) return;
-      // Deduct extra bet
-      const extra = await query(
-        `UPDATE users SET cc_balance = cc_balance - $1 WHERE id = $2 AND cc_balance >= $1 RETURNING cc_balance`,
-        [game.bet, userId]
-      );
-      if (extra.rows.length === 0) return socket.emit('blackjack:error', { message: 'Insufficient balance for split' });
-      game.cc_balance = extra.rows[0].cc_balance;
-      game.splitCount++;
-      // Split the hand
-      const newHand = [hand.pop()];
-      hand.push(draw());
-      newHand.push(draw());
-      game.playerHands.splice(game.activeHandIdx + 1, 0, newHand);
-      emitState(socket, game);
+    } catch (e) {
+      console.error('[bj:action]', e.message);
+      socket.emit('blackjack:error', { message: 'Server error — please refresh your balance' });
     }
   });
 }
