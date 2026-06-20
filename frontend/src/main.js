@@ -16,6 +16,8 @@ import { renderRps }        from './pages/game-rps.js';
 import { renderHigherLow }  from './pages/game-higherlow.js';
 import { renderDuels }      from './pages/game-duels.js';
 import { renderUno }        from './pages/game-uno.js';
+import { renderShop }       from './pages/shop.js';
+import { renderProfile }    from './pages/profile.js';
 
 const app = document.getElementById('app');
 
@@ -78,6 +80,8 @@ export function navigate(page, data) {
     case 'game-mines':     return renderMines(app);
     case 'game-roulette':  return renderRoulette(app);
     case 'game-plinko':    return renderPlinko(app);
+    case 'shop':           return renderShop(app, data);
+    case 'profile':        return renderProfile(app);
     default:               return renderHome(app);
   }
 }

@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { store, setUser, updateBalance, clearUser } from '../store.js';
+import { store, setUser, updateBalance } from '../store.js';
 
 const DAILY_REWARDS = [100, 200, 250, 300, 400, 500, 750, 800, 1000];
 function rewardForDay(day) { return DAILY_REWARDS[Math.min(day - 1, 8)]; }
@@ -143,10 +143,10 @@ function inject(app) {
           <div class="di">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6" r="2.5"/><path d="M1.5 15c0-2.76 2.24-5 5-5s5 2.24 5 5"/><circle cx="13" cy="5.5" r="2"/><path d="M16.5 14c0-2.21-1.57-4-3.5-4"/></svg>
           </div>
-          <div class="di">
+          <div class="di" id="nav-shop">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h10l-1.2 8H5.2L4 4z"/><path d="M6.5 4c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5"/><circle cx="6.5" cy="14.5" r="1"/><circle cx="11.5" cy="14.5" r="1"/></svg>
           </div>
-          <div class="di" id="nav-logout">
+          <div class="di" id="nav-profile">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="3"/><path d="M2 16c0-3.87 3.13-7 7-7s7 3.13 7 7"/></svg>
           </div>
         </div>
@@ -241,13 +241,12 @@ function bindEvents(app) {
     window.__navigate('games');
   });
 
-  // Logout
-  document.getElementById('nav-logout')?.addEventListener('click', async () => {
-    try { await api.post('/auth/logout'); } catch (_) {}
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    clearUser();
-    window.__navigate('landing');
+  // Shop / Profile nav
+  document.getElementById('nav-shop')?.addEventListener('click', () => {
+    window.__navigate('shop');
+  });
+  document.getElementById('nav-profile')?.addEventListener('click', () => {
+    window.__navigate('profile');
   });
 
   // Live balance
