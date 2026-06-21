@@ -190,6 +190,85 @@ export function renderCosmeticPreview(item) {
   };
 }
 
+/**
+ * Returns { style, className, color } for rendering a USERNAME wearing this
+ * aura — a real glow on the text itself, not just a color tint. This is
+ * separate from renderCosmeticPreview's small dot because text needs
+ * text-shadow-based glow, not transform/scale (which would distort letters).
+ * @param {{rarity:string, preview_key:string}|null} aura
+ */
+export function auraNameStyle(aura) {
+  if (!aura) return { style: '', className: '', color: null };
+  const v = VISUALS[aura.preview_key] || {};
+  const col = v.color || RARITY_COLORS[aura.rarity] || '#10b981';
+  const glow = RARITY_GLOW[aura.rarity] || RARITY_GLOW.Common;
+  const shadow = `0 0 ${glow.blur}px ${col}, 0 0 ${glow.blur * 1.8}px ${col}99`;
+
+  let className = '';
+  if (v.flame) className = 'aura-name-flame';
+  else if (v.flicker) className = 'aura-name-flicker';
+  else if (glow.pulse) className = 'aura-name-pulse';
+
+  return {
+    style: `text-shadow:${shadow};--glow-color:${col};`,
+    className,
+    color: col,
+  };
+}
+
+/**
+ * Base text color for a username wearing this Name Color cosmetic.
+ * Independent of font and aura — if nothing is equipped, caller should
+ * fall back to the default white.
+ * @param {{rarity:string, preview_key:string}|null} nameColor
+ */
+export function nameColorStyle(nameColor) {
+  if (!nameColor) return { style: '', className: '' };
+  const v = VISUALS[nameColor.preview_key] || {};
+  if (v.prismatic) {
+    return {
+      style: `background:linear-gradient(90deg,#ff5f6d,#ffc371,#47e3a3,#4facfe,#a18cd1,#ff5f6d);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;`,
+      className: 'prismatic-text',
+    };
+  }
+  const col = v.color || RARITY_COLORS[nameColor.rarity] || '#fff';
+  return { style: `color:${col};`, className: '' };
+}
+
+/**
+ * Typography ONLY (family/weight/style/spacing) for a username wearing this
+ * Name Font cosmetic. Deliberately excludes the outline/goldFill/shadow
+ * flourishes used in renderCosmeticPreview's browse swatch — those bake in a
+ * fill color, which would fight with whatever Name Color is also equipped.
+ * Font and color are independent layers; live rendering keeps them that way.
+ */
+export function nameFontFamily(font) {
+  if (!font) return '';
+  const v = VISUALS[font.preview_key] || {};
+  return [
+    v.font ? `font-family:${v.font};` : '',
+    v.weight ? `font-weight:${v.weight};` : '',
+    v.style ? `font-style:${v.style};` : '',
+    v.spacing ? `letter-spacing:${v.spacing};` : '',
+  ].join('');
+}
+
+/**
+ * Glowing, rarity-scaled ring + icon badge for an avatar wearing this
+ * Avatar Frame cosmetic — not just a flat border-color swap.
+ * @param {{rarity:string, preview_key:string}|null} frame
+ */
+export function frameRingStyle(frame) {
+  if (!frame) return { style: '', className: '', icon: null };
+  const v = VISUALS[frame.preview_key] || {};
+  const col = RARITY_COLORS[frame.rarity] || '#9ca3af';
+  return {
+    style: `border-color:${col};box-shadow:${glowStyle(col, frame.rarity)};`,
+    className: (RARITY_GLOW[frame.rarity] || RARITY_GLOW.Common).pulse ? 'frame-ring-pulse' : '',
+    icon: v.icon || null,
+  };
+}
+
 export const COSMETIC_PREVIEW_KEYFRAMES = `
   @keyframes prismaticShift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
   @keyframes auraPulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.25);opacity:.7} }
@@ -199,6 +278,17 @@ export const COSMETIC_PREVIEW_KEYFRAMES = `
   .aura-pulse{animation:auraPulse 1.8s ease-in-out infinite}
   .aura-flame{animation:auraFlame 1.2s ease-in-out infinite}
   .aura-flicker{animation:auraFlicker 2.4s ease-in-out infinite}
+
+  @keyframes auraNamePulse { 0%,100%{filter:brightness(1)} 50%{filter:brightness(1.5)} }
+  @keyframes auraNameFlame { 0%,100%{text-shadow:0 0 10px var(--glow-color),0 0 20px var(--glow-color)} 50%{text-shadow:0 0 20px var(--glow-color),0 0 38px #fbbf24} }
+  @keyframes auraNameFlicker { 0%,100%{opacity:1} 45%{opacity:.55} 55%{opacity:.95} }
+  .aura-name-pulse{animation:auraNamePulse 1.8s ease-in-out infinite}
+  .aura-name-flame{animation:auraNameFlame 1.2s ease-in-out infinite}
+  .aura-name-flicker{animation:auraNameFlicker 2.4s ease-in-out infinite}
+
+  @keyframes frameGlowPulse { 0%,100%{filter:brightness(1)} 50%{filter:brightness(1.3)} }
+  .frame-ring-pulse{animation:frameGlowPulse 2s ease-in-out infinite}
+  .prismatic-text{animation:prismaticShift 3s linear infinite}
 `;
 
 export const CATEGORY_LABELS = {

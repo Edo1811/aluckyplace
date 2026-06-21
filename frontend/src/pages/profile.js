@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { store, updateBalance, clearUser } from '../store.js';
-import { renderCosmeticPreview, COSMETIC_PREVIEW_KEYFRAMES, CATEGORY_LABELS, RARITY_COLORS } from '../cosmeticPreview.js';
+import { renderCosmeticPreview, COSMETIC_PREVIEW_KEYFRAMES, CATEGORY_LABELS, RARITY_COLORS, auraNameStyle, nameColorStyle, nameFontFamily, frameRingStyle } from '../cosmeticPreview.js';
 
 let curTab = 0;
 let profileData = null;
@@ -37,7 +37,8 @@ function inject(app) {
       .hero{padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
       .hero-top{display:flex;align-items:flex-start;gap:14px;margin-bottom:14px}
       .av-wrap{position:relative;flex-shrink:0}
-      .av{width:64px;height:64px;border-radius:50%;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:28px;border:2px solid transparent}
+      .av{width:64px;height:64px;border-radius:50%;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:28px;border:2px solid rgba(255,255,255,.15)}
+      .av-badge{position:absolute;bottom:-3px;right:-3px;width:22px;height:22px;border-radius:50%;background:#0a0a0a;border:2px solid rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:12px}
       .hero-info{flex:1;min-width:0}
       .hero-name{font-size:22px;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
       .hero-aura{display:inline-block;padding:1px 10px;border-radius:12px;font-size:11px;font-weight:700;letter-spacing:.04em}
@@ -206,19 +207,33 @@ function renderHero() {
   const aura = p.equipped.name_aura;
   const frame = p.equipped.avatar_frame;
   const title = p.equipped.status_title;
-  const auraCol = aura ? (RARITY_COLORS[aura.rarity] || '#10b981') : null;
+  const color = p.equipped.name_color;
+  const font = p.equipped.name_font;
+
+  const auraName = auraNameStyle(aura);
+  const colorName = nameColorStyle(color);
+  const fontName = nameFontFamily(font);
+  const ring = frameRingStyle(frame);
+
+  // Three independent layers on the same span: fill color (or prismatic
+  // gradient), typography, and glow. None of them override each other now.
+  const nameStyle = `${colorName.style}${fontName}${auraName.style}`;
+  const nameClass = `${colorName.className} ${auraName.className}`.trim();
+
+  const titleCol = title ? (RARITY_COLORS[title.rarity] || 'rgba(255,255,255,.4)') : null;
 
   el.innerHTML = `
     <div class="hero-top">
       <div class="av-wrap">
-        <div class="av" style="${frame ? `border-color:${RARITY_COLORS[frame.rarity] || '#fff'}` : ''}">👤</div>
+        <div class="av" style="${ring.style}">👤</div>
+        ${ring.icon ? `<div class="av-badge ${ring.className}" style="border-color:${RARITY_COLORS[frame.rarity] || '#9ca3af'}">${ring.icon}</div>` : ''}
       </div>
       <div class="hero-info">
         <div class="hero-name">
-          <span style="${auraCol ? `color:${auraCol}` : ''}">${p.username}</span>
-          ${aura ? `<span class="hero-aura" style="background:${auraCol}22;color:${auraCol}">${aura.name}</span>` : ''}
+          <span class="${nameClass}" style="${nameStyle}">${p.username}</span>
+          ${aura ? `<span class="hero-aura" style="background:${auraName.color}22;color:${auraName.color}">${aura.name}</span>` : ''}
         </div>
-        ${title ? `<div class="hero-title">"${title.name}"</div>` : ''}
+        ${title ? `<div class="hero-title" style="color:${titleCol}">"${title.name}"</div>` : ''}
         <div class="hero-bal"><span>CC <span class="hb">${Number(p.cc_balance).toLocaleString()}</span></span><span>A <span class="hba">${Number(p.a_balance).toLocaleString()}</span></span></div>
         <div class="hero-actions">
           <button class="ha pri" id="editProfileBtn">Edit Profile</button>
