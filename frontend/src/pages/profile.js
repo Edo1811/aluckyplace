@@ -215,18 +215,19 @@ function renderHero() {
   const fontName = nameFontFamily(font);
   const ring = frameRingStyle(frame);
 
-  // Three independent layers on the same span: fill color (or prismatic
-  // gradient), typography, and glow. None of them override each other now.
-  const nameStyle = `${colorName.style}${fontName}${auraName.style}`;
-  const nameClass = `${colorName.className} ${auraName.className}`.trim();
+  // Four independent layers on the same span: fill color (or prismatic
+  // gradient — possibly overridden by the font's own fill technique, e.g.
+  // Neon Outline or Engraved Gold), typography, and glow.
+  const nameStyle = `${colorName.style}${fontName.style}${auraName.style}`;
+  const nameClass = `${colorName.className} ${fontName.className} ${auraName.className}`.trim();
 
   const titleCol = title ? (RARITY_COLORS[title.rarity] || 'rgba(255,255,255,.4)') : null;
 
   el.innerHTML = `
     <div class="hero-top">
       <div class="av-wrap">
-        <div class="av" style="${ring.style}">👤</div>
-        ${ring.icon ? `<div class="av-badge ${ring.className}" style="border-color:${RARITY_COLORS[frame.rarity] || '#9ca3af'}">${ring.icon}</div>` : ''}
+        <div class="av ${ring.className}" style="${ring.style}">👤</div>
+        ${ring.icon ? `<div class="av-badge" style="border-color:${ring.color || '#9ca3af'}">${ring.icon}</div>` : ''}
       </div>
       <div class="hero-info">
         <div class="hero-name">
