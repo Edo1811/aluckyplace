@@ -1,13 +1,6 @@
 import { api } from '../api.js';
 import { store, updateBalance, clearUser } from '../store.js';
-
-const RARITY_COLORS = {
-  Common:    '#9ca3af',
-  Rare:      '#3b82f6',
-  Epic:      '#a855f7',
-  Legendary: '#D4AF37',
-  Exotic:    '#f97316',
-};
+import { renderCosmeticPreview, COSMETIC_PREVIEW_KEYFRAMES, CATEGORY_LABELS, RARITY_COLORS } from '../cosmeticPreview.js';
 
 let curTab = 0;
 let profileData = null;
@@ -33,7 +26,10 @@ export async function renderProfile(app) {
 function inject(app) {
   app.innerHTML = `
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cinzel@5/index.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/dancing-script@5/index.css">
     <style>
+      ${COSMETIC_PREVIEW_KEYFRAMES}
       *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
       body{background:#050505}
       .pp{display:flex;flex-direction:column;height:100vh;background:#050505;font-family:'Playfair Display',Georgia,serif}
@@ -85,12 +81,29 @@ function inject(app) {
       .stval.grn{color:#10b981}
       .empty-note{font-size:12px;color:rgba(255,255,255,.25);text-align:center;padding:30px 10px;font-style:italic}
 
-      .ach-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:20px}
-      .ach{width:100%;aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;position:relative}
-      .ach.unlocked{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
-      .ach.locked{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.04);opacity:.4;filter:grayscale(1)}
+      .ach-section{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.25);margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+      .ach-section::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.06)}
+      .ach-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:6px}
+      .ach{width:100%;aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;position:relative;cursor:help}
+      .ach.unlocked{background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.18)}
+      .ach.locked{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.04);opacity:.45;filter:grayscale(1)}
       .ach-em{font-size:22px}
-      .ach-name{font-size:8.5px;color:rgba(255,255,255,.4);text-align:center;line-height:1.3;padding:0 3px}
+      .ach-name{font-size:8px;color:rgba(255,255,255,.45);text-align:center;line-height:1.25;padding:0 3px}
+      .ach[data-tip]:hover::after{
+        content:attr(data-tip);white-space:pre-line;position:absolute;bottom:112%;left:50%;transform:translateX(-50%);
+        background:#0d0d0d;border:1px solid rgba(255,255,255,.15);color:#fff;font-size:10.5px;font-weight:400;
+        padding:9px 11px;border-radius:8px;width:150px;text-align:center;z-index:60;
+        box-shadow:0 10px 24px rgba(0,0,0,.6);pointer-events:none;line-height:1.5;font-style:normal;
+      }
+      .ach[data-tip]:hover::before{
+        content:'';position:absolute;bottom:100%;left:50%;transform:translateX(-50%);
+        border:5px solid transparent;border-top-color:#0d0d0d;z-index:61;
+      }
+      .chal-section{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.25);margin:14px 0 8px;display:flex;align-items:center;gap:8px}
+      .chal-section::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.06)}
+      .cos-section{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.28);margin:18px 0 9px;display:flex;align-items:center;gap:8px}
+      .cos-section:first-child{margin-top:0}
+      .cos-section::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.06)}
       .chal{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:11px;padding:13px 14px;margin-bottom:8px}
       .chal-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px}
       .chal-name{font-size:13px;font-weight:700;color:#fff}
@@ -264,35 +277,53 @@ async function renderAchievements(c) {
     return;
   }
 
-  const unlockedCount = achievementsCache.filter(a => a.unlocked).length;
+  const unlocked = achievementsCache.filter(a => a.unlocked).sort((a, b) => new Date(b.unlocked_at) - new Date(a.unlocked_at));
+  const locked = achievementsCache.filter(a => !a.unlocked);
+
+  const tip = a => {
+    const status = a.unlocked
+      ? `✓ Unlocked ${new Date(a.unlocked_at).toLocaleDateString()}`
+      : '🔒 Locked';
+    return `${a.name}\n${a.description}\n${status}`;
+  };
+
+  const achCard = a => `<div class="ach ${a.unlocked ? 'unlocked' : 'locked'}" data-tip="${tip(a)}">
+    <span class="ach-em">${a.emoji}</span>
+    <span class="ach-name">${a.name}</span>
+  </div>`;
+
+  const ready = challengesCache.filter(ch => ch.completed && !ch.reward_claimed);
+  const inProgress = challengesCache.filter(ch => !ch.completed);
+  const claimed = challengesCache.filter(ch => ch.completed && ch.reward_claimed);
+
+  const chalCard = ch => {
+    const pct = Math.min((ch.progress / ch.target) * 100, 100);
+    const col = ch.completed ? '#D4AF37' : '#10b981';
+    return `<div class="chal${ch.completed ? ' done' : ''}">
+      <div class="chal-top">
+        <span class="chal-name">${ch.name}</span>
+        ${ch.reward_claimed
+          ? '<span class="chal-done-badge">✓ Claimed</span>'
+          : ch.completed
+            ? `<button class="chal-claim" data-claim="${ch.id}">Claim +${ch.reward_a} A</button>`
+            : `<span class="chal-rew">+${ch.reward_a} A</span>`}
+      </div>
+      <div class="chal-desc">${ch.description}</div>
+      <div class="chal-bar"><div class="chal-fill" style="width:${pct}%;background:${col}"></div></div>
+      <div class="chal-prog"><span>${Math.min(ch.progress, ch.target).toLocaleString()} / ${ch.target.toLocaleString()}</span><span>${Math.round(pct)}%</span></div>
+    </div>`;
+  };
 
   c.innerHTML = `
-    <div class="sec-title">Achievements <span style="text-transform:none;letter-spacing:0;color:rgba(255,255,255,.18)">${unlockedCount} / ${achievementsCache.length} unlocked</span></div>
-    <div class="ach-grid">
-      ${achievementsCache.map(a => `<div class="ach ${a.unlocked ? 'unlocked' : 'locked'}" title="${a.description}">
-        <span class="ach-em">${a.emoji}</span>
-        <span class="ach-name">${a.name}</span>
-      </div>`).join('')}
-    </div>
-    <div class="sec-title">Challenges</div>
-    ${challengesCache.map(ch => {
-      const pct = Math.min((ch.progress / ch.target) * 100, 100);
-      const col = ch.completed ? '#D4AF37' : '#10b981';
-      const canClaim = ch.completed && !ch.reward_claimed;
-      return `<div class="chal${ch.completed ? ' done' : ''}">
-        <div class="chal-top">
-          <span class="chal-name">${ch.name}</span>
-          ${ch.reward_claimed
-            ? '<span class="chal-done-badge">✓ Claimed</span>'
-            : canClaim
-              ? `<button class="chal-claim" data-claim="${ch.id}">Claim +${ch.reward_a} A</button>`
-              : `<span class="chal-rew">+${ch.reward_a} A</span>`}
-        </div>
-        <div class="chal-desc">${ch.description}</div>
-        <div class="chal-bar"><div class="chal-fill" style="width:${pct}%;background:${col}"></div></div>
-        <div class="chal-prog"><span>${Math.min(ch.progress, ch.target).toLocaleString()} / ${ch.target.toLocaleString()}</span><span>${Math.round(pct)}%</span></div>
-      </div>`;
-    }).join('')}`;
+    <div class="sec-title">Achievements <span style="text-transform:none;letter-spacing:0;color:rgba(255,255,255,.18)">${unlocked.length} / ${achievementsCache.length} unlocked</span></div>
+
+    ${unlocked.length > 0 ? `<div class="ach-section">Unlocked</div><div class="ach-grid">${unlocked.map(achCard).join('')}</div>` : ''}
+    ${locked.length > 0 ? `<div class="ach-section">Locked</div><div class="ach-grid">${locked.map(achCard).join('')}</div>` : ''}
+
+    <div class="sec-title" style="margin-top:22px">Challenges</div>
+    ${ready.length > 0 ? `<div class="chal-section">Ready to claim</div>${ready.map(chalCard).join('')}` : ''}
+    ${inProgress.length > 0 ? `<div class="chal-section">In progress</div>${inProgress.map(chalCard).join('')}` : ''}
+    ${claimed.length > 0 ? `<div class="chal-section">Claimed</div>${claimed.map(chalCard).join('')}` : ''}`;
 }
 
 async function renderCosmetics(c) {
@@ -309,32 +340,41 @@ async function renderCosmetics(c) {
     return;
   }
 
+  // Group by category, in a fixed display order, instead of one flat
+  // interleaved grid — this is the bulk of why it looked disorganized.
+  const order = Object.keys(CATEGORY_LABELS);
+  const byCategory = {};
+  for (const it of cosmeticsCache) (byCategory[it.category] ||= []).push(it);
+
+  const cardHTML = it => {
+    const rarityCol = RARITY_COLORS[it.rarity] || '#9ca3af';
+    const preview = renderCosmeticPreview(it);
+    const showForm = listingPriceFor === it.user_cosmetic_id;
+    return `<div class="citem${it.is_equipped ? ' equipped' : ''}">
+      ${it.is_equipped ? '<div class="citem-eq">Equipped</div>' : ''}
+      <div class="citem-prev" style="${preview.boxStyle}">
+        ${preview.innerHTML}
+        <div class="citem-rbar" style="background:${rarityCol}"></div>
+      </div>
+      <div class="citem-name">${it.name}</div>
+      <div class="citem-rar" style="color:${rarityCol}">${it.rarity}</div>
+      <div class="citem-btns">
+        <button class="cbtn ${it.is_equipped ? 'uneq' : 'eq'}" data-equip="${it.cosmetic_id}" data-state="${it.is_equipped}">${it.is_equipped ? 'Unequip' : 'Equip'}</button>
+        <button class="cbtn list" data-list="${it.user_cosmetic_id}">${showForm ? 'Cancel' : 'List'}</button>
+      </div>
+      ${showForm ? `<div class="list-form">
+        <input class="list-input" type="number" min="1" placeholder="Price in A" id="priceInput">
+        <button class="list-confirm" data-confirm-list="${it.user_cosmetic_id}">Confirm</button>
+      </div>` : ''}
+    </div>`;
+  };
+
   c.innerHTML = `
-    <div class="sec-title">Your Cosmetics</div>
-    <div class="owned-grid">
-      ${cosmeticsCache.map(it => {
-        const col = RARITY_COLORS[it.rarity] || '#9ca3af';
-        const showForm = listingPriceFor === it.user_cosmetic_id;
-        return `<div class="citem${it.is_equipped ? ' equipped' : ''}">
-          ${it.is_equipped ? '<div class="citem-eq">Equipped</div>' : ''}
-          <div class="citem-prev" style="background:${col}18">
-            <span>🎨</span>
-            <div class="citem-rbar" style="background:${col}"></div>
-          </div>
-          <div class="citem-name">${it.name}</div>
-          <div class="citem-cat">${it.category.replace('_', ' ')}</div>
-          <div class="citem-rar" style="color:${col}">${it.rarity}</div>
-          <div class="citem-btns">
-            <button class="cbtn ${it.is_equipped ? 'uneq' : 'eq'}" data-equip="${it.cosmetic_id}" data-state="${it.is_equipped}">${it.is_equipped ? 'Unequip' : 'Equip'}</button>
-            <button class="cbtn list" data-list="${it.user_cosmetic_id}">${showForm ? 'Cancel' : 'List'}</button>
-          </div>
-          ${showForm ? `<div class="list-form">
-            <input class="list-input" type="number" min="1" placeholder="Price in A" id="priceInput">
-            <button class="list-confirm" data-confirm-list="${it.user_cosmetic_id}">Confirm</button>
-          </div>` : ''}
-        </div>`;
-      }).join('')}
-    </div>
+    <div class="sec-title">Your Cosmetics <span style="text-transform:none;letter-spacing:0;color:rgba(255,255,255,.18)">${cosmeticsCache.length} owned</span></div>
+    ${order.filter(cat => byCategory[cat]?.length).map(cat => `
+      <div class="cos-section">${CATEGORY_LABELS[cat]} <span style="color:rgba(255,255,255,.15)">${byCategory[cat].length}</span></div>
+      <div class="owned-grid">${byCategory[cat].map(cardHTML).join('')}</div>
+    `).join('')}
     <div class="empty-note" style="padding-top:6px">Equip, unequip, or list an item for sale on the Player Shop.</div>`;
 }
 

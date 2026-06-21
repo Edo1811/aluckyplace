@@ -1,4 +1,4 @@
-// Phase 7 — Player shop: listings, purchases, cosmetic equip
+// Phase 7 — Player shop: listings, purchases, pack opening
 // GET  /shop/listings
 // POST /shop/listings          — create listing
 // POST /shop/listings/:id/buy  — purchase (buyer pays price * 1.15, seller gets price)
@@ -20,7 +20,7 @@ function buyerPrice(price_a) {
 
 // ── GET /shop/listings ──────────────────────────────────────────────────────
 // Active listings, optionally filtered by ?category= and ?rarity=
-router.get('/', requireAuth, async (req, res) => {
+router.get('/listings', requireAuth, async (req, res) => {
   try {
     const { category, rarity } = req.query;
     const conditions = ['sl.sold_at IS NULL'];
@@ -55,7 +55,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 // ── POST /shop/listings ──────────────────────────────────────────────────────
 // Body: { user_cosmetic_id, price_a }  — price_a is what the seller receives
-router.post('/', requireAuth, async (req, res) => {
+router.post('/listings', requireAuth, async (req, res) => {
   try {
     const { userId } = req.user;
     let { user_cosmetic_id, price_a } = req.body;
@@ -88,7 +88,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // ── POST /shop/listings/:id/buy ──────────────────────────────────────────────
-router.post('/:id/buy', requireAuth, async (req, res) => {
+router.post('/listings/:id/buy', requireAuth, async (req, res) => {
   const client = await getClient();
   try {
     const buyerId = req.user.userId;
@@ -173,7 +173,7 @@ router.post('/:id/buy', requireAuth, async (req, res) => {
 
 // ── DELETE /shop/listings/:id ─────────────────────────────────────────────────
 // Cancel — never sold, so this hard-deletes the row.
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/listings/:id', requireAuth, async (req, res) => {
   try {
     const result = await query(
       `DELETE FROM shop_listings WHERE id = $1 AND seller_id = $2 AND sold_at IS NULL RETURNING id`,

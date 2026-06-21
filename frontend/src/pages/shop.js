@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { store, updateBalance } from '../store.js';
+import { renderCosmeticPreview, COSMETIC_PREVIEW_KEYFRAMES } from '../cosmeticPreview.js';
 
 const CATEGORIES = [
   { em: '🖼', value: 'avatar_frame', label: 'Avatar Frame' },
@@ -47,7 +48,10 @@ export async function renderShop(app, opts = {}) {
 function inject(app) {
   app.innerHTML = `
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cinzel@5/index.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/dancing-script@5/index.css">
     <style>
+      ${COSMETIC_PREVIEW_KEYFRAMES}
       *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
       body{background:#050505}
       .sp{display:flex;flex-direction:column;height:100vh;background:#050505;font-family:'Playfair Display',Georgia,serif}
@@ -251,9 +255,10 @@ async function renderPlayerShop(c) {
               ${filtered.map(it => {
                 const R = RARITY_COLORS[it.rarity] || RARITY_COLORS.Common;
                 const isMine = it.seller === myUsername;
+                const preview = renderCosmeticPreview(it);
                 return `<div class="item">
-                  <div class="item-preview" style="background:${R.bg}">
-                    <span style="font-size:28px">🎨</span>
+                  <div class="item-preview" style="${preview.boxStyle || `background:${R.bg}`}">
+                    ${preview.innerHTML}
                     <div class="rarity-bar" style="background:${R.col}"></div>
                   </div>
                   <div class="iname">${it.name}</div>
