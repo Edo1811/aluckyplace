@@ -87,7 +87,7 @@ function inject(app) {
       .mine-btn.on{background:rgba(212,175,55,.12);border-color:rgba(212,175,55,.25);color:#D4AF37}
       .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
       .item{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:12px;position:relative}
-      .item-preview{height:64px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:9px;position:relative;overflow:hidden}
+      .item-preview{height:64px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:9px;position:relative;overflow:visible}
       .rarity-bar{position:absolute;bottom:0;left:0;right:0;height:3px}
       .iname{font-size:12px;font-weight:700;color:#fff;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .iseller{font-size:10px;color:rgba(255,255,255,.25);margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
