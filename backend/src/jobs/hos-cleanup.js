@@ -1,14 +1,24 @@
-// Phase 7 — Nightly HOS cleanup cron job
-// Removes hall_of_shame entries for users who have hos_opted_out = TRUE
+// Phase 8 — Nightly HOS cleanup. Runs 03:00 UTC.
+// Removes Hall of Shame entries for users who opted out (retroactive, per balance.md).
 
 const cron = require('node-cron');
+const { query } = require('../db');
 
-function start() {
-  // '0 3 * * *' = every day at 03:00 UTC (quiet hours)
-  cron.schedule('0 3 * * *', async () => {
-    // Phase 7
-    console.log('[cron] hos-cleanup: not implemented yet');
-  }, { timezone: 'UTC' });
+async function runHosCleanup() {
+  try {
+    const r = await query(
+      `DELETE FROM hall_of_shame h USING users u
+       WHERE h.user_id = u.id AND u.hos_opted_out = TRUE`
+    );
+    console.log(`[cron] hos-cleanup: removed ${r.rowCount} entries`);
+  } catch (e) {
+    console.error('[cron] hos-cleanup failed:', e.message);
+  }
 }
 
-module.exports = { start };
+function start() {
+  cron.schedule('0 3 * * *', runHosCleanup, { timezone: 'UTC' });
+  console.log('[cron] hos-cleanup scheduled (03:00 UTC)');
+}
+
+module.exports = { start, runHosCleanup };

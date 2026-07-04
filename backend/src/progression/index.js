@@ -12,6 +12,23 @@
 // unlockAchievement / bumpChallengeProgress are exported so Phase 8 code
 // can call them directly once those systems exist — see the TODO comments
 // left in social/guilds.js, social/hall.js, and jobs/weekly-badge.js.
+//
+// Phase 8 update: the Hall of Fame/Shame + top-10 checks below are now wired in.
+
+const { checkHofTriggers, checkHosTriggers } = require('../social/hall');
+
+// Top-10 all-time (by CC). Idempotent — safe to call on any balance change.
+async function checkTopTen(client, userId) {
+  const r = await client.query(
+    `SELECT COUNT(*)::int AS higher FROM users
+     WHERE cc_balance > (SELECT cc_balance FROM users WHERE id = $1)`,
+    [userId]
+  );
+  if (r.rows[0].higher + 1 <= 10) {
+    await unlockAchievement(client, userId, 4);         // Top 10
+    await bumpChallengeProgress(client, userId, 17, 1); // Leaderboard Climber
+  }
+}
 
 // ── Static metadata (balance.md) ─────────────────────────────────────────────
 
@@ -267,6 +284,13 @@ async function recordSoloResult(client, { userId, game, betAmount, payoutAmount,
       break;
     }
   }
+
+  // ── Phase 8 — leaderboard rank + Hall of Fame/Shame (same transaction) ──────
+  await checkTopTen(client, userId);
+  const ccAfter  = Number(ccBalanceAfter);
+  const ccBefore = ccAfter - net;
+  await checkHofTriggers(client, { userId, game, net, balanceBefore: ccBefore, balanceAfter: ccAfter, streak: current_streak });
+  await checkHosTriggers(client, { userId, game, net, balanceBefore: ccBefore, balanceAfter: ccAfter });
 }
 
 // ── PvP — call from inside a transaction around the awardWinner/autoWin
@@ -334,6 +358,13 @@ async function recordPvpResult(client, match, winnerId, loserId) {
     if (bk.bankruptcy_count >= 3) await unlockAchievement(client, loserId, 23); // Repeat Offender
     await bumpChallengeProgress(client, loserId, 21, bk.bankruptcy_count); // Five Times Under
   }
+
+  // ── Phase 8 — leaderboard rank + Hall of Fame/Shame (same transaction) ──────
+  await checkTopTen(client, winnerId);
+  const winnerNet = pot - winnerBet;
+  const loserNet  = -loserBet;
+  await checkHofTriggers(client, { userId: winnerId, game, net: winnerNet, balanceBefore: winnerBalance - winnerNet, balanceAfter: winnerBalance });
+  await checkHosTriggers(client, { userId: loserId,  game, net: loserNet,  balanceBefore: loserBalance - loserNet,   balanceAfter: loserBalance });
 }
 
 // ── Daily streaks — call from daily.js right before COMMIT ──────────────────

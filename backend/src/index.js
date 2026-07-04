@@ -68,6 +68,7 @@ app.use('/daily',   dailyRoutes);
 app.use('/convert', convertRoutes);
 app.use('/games',   gameRoutes);
 app.use('/social',  socialRoutes);
+app.use('/social',  require('./social/guild-routes')(io));
 app.use('/shop',    shopRoutes);
 app.use('/cosmetics', cosmeticRoutes);
 app.use(progressionRoutes);
@@ -122,6 +123,10 @@ server.listen(PORT, async () => {
   catch (err) { console.error('[DB] Connection failed:', err.message); }
   try { const ok = await redisPing(); console.log('[Redis] Connected to Upstash', ok ? '✓' : '(unexpected)'); }
   catch (err) { console.error('[Redis] Connection failed:', err.message); }
+
+  // ── Phase 8 cron jobs ─────────────────────────────────────────────────────
+  require('./jobs/weekly-badge').start();
+  require('./jobs/hos-cleanup').start();
 });
 
 module.exports = { app, io };
