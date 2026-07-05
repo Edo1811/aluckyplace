@@ -18,6 +18,7 @@ import { renderDuels }      from './pages/game-duels.js';
 import { renderUno }        from './pages/game-uno.js';
 import { renderShop }       from './pages/shop.js';
 import { renderProfile }    from './pages/profile.js';
+import { renderSocial }     from './pages/social.js';
 
 const app = document.getElementById('app');
 
@@ -82,6 +83,7 @@ export function navigate(page, data) {
     case 'game-plinko':    return renderPlinko(app);
     case 'shop':           return renderShop(app, data);
     case 'profile':        return renderProfile(app);
+    case 'social':         return renderSocial(app);
     default:               return renderHome(app);
   }
 }

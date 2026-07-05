@@ -37,7 +37,7 @@ function fmtHallEntry(row) {
 }
 
 // ── GET /social/leaderboard ───────────────────────────────────────────────────
-router.get('/leaderboard', requireAuth, async (_req, res) => {
+router.get('/leaderboard', requireAuth, async (req, res) => {
   try {
     const badgeHolder = await currentBadgeHolder();
     const r = await query(
@@ -57,7 +57,35 @@ router.get('/leaderboard', requireAuth, async (_req, res) => {
       cosmetics: row.cosmetics,
       weekly_badge: row.id === badgeHolder,
     }));
-    res.json({ leaderboard });
+
+    // The viewer's own row — so "jump to me" works even outside the top 50.
+    const viewerId = req.user.userId;
+    let me = leaderboard.find((e) => e.user_id === viewerId) || null;
+    if (!me) {
+      const meRes = await query(
+        `SELECT u.id, u.username, u.cc_balance, ${EQUIPPED_COSMETICS_JSON} AS cosmetics,
+                (SELECT COUNT(*) FROM users x WHERE x.cc_balance > u.cc_balance)::int AS higher
+         FROM users u
+         LEFT JOIN user_cosmetics uc     ON uc.user_id = u.id AND uc.is_equipped = TRUE
+         LEFT JOIN cosmetics_catalog cc  ON cc.id = uc.cosmetic_id
+         WHERE u.id = $1
+         GROUP BY u.id`,
+        [viewerId]
+      );
+      if (meRes.rows.length) {
+        const row = meRes.rows[0];
+        me = {
+          rank: row.higher + 1,
+          user_id: row.id,
+          username: row.username,
+          cc_balance: Number(row.cc_balance),
+          cosmetics: row.cosmetics,
+          weekly_badge: row.id === badgeHolder,
+        };
+      }
+    }
+
+    res.json({ leaderboard, me });
   } catch (err) {
     console.error('[social/leaderboard]', err.message);
     res.status(500).json({ error: 'Failed to load leaderboard' });
