@@ -108,8 +108,21 @@ module.exports = function makeGuildRouter(io) {
         [guildId]
       );
 
+      // Presence: one guarded batch call. Online dots are cosmetic, so a Redis
+      // hiccup must never fail the whole page — worst case everyone shows offline.
       const today = new Date().toISOString().slice(0, 10);
-      const members = await Promise.all(mr.rows.map(async (m) => ({
+      const onlineSet = new Set();
+      try {
+        const keys = mr.rows.map((m) => `presence:${m.user_id}`);
+        if (keys.length) {
+          const vals = await redis.mget(...keys);
+          mr.rows.forEach((m, i) => { if (vals[i] != null) onlineSet.add(m.user_id); });
+        }
+      } catch (e) {
+        console.warn('[guilds/detail] presence lookup skipped:', e.message);
+      }
+
+      const members = mr.rows.map((m) => ({
         user_id: m.user_id,
         username: m.username,
         cc_balance: Number(m.cc_balance),
@@ -117,8 +130,8 @@ module.exports = function makeGuildRouter(io) {
         joined_at: m.joined_at,
         donations_today: String(m.last_donation_reset).slice(0, 10) < today ? 0 : m.donations_recv_today,
         is_owner: m.user_id === g.owner_id,
-        online: (await redis.exists(`presence:${m.user_id}`)) === 1,
-      })));
+        online: onlineSet.has(m.user_id),
+      }));
 
       const isOwner = g.owner_id === req.user.userId;
       const isMember = members.some((m) => m.user_id === req.user.userId);
