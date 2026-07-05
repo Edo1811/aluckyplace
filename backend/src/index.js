@@ -25,6 +25,7 @@ const registerCrashHandlers     = require('./games/crash');
 const registerMinesHandlers     = require('./games/mines');
 const registerBlackjackHandlers = require('./games/blackjack');
 const registerPvpHandlers       = require('./pvp/matchmaking');
+const registerFriendlyHandlers  = require('./pvp/friendly');
 const registerGuildHandlers     = require('./social/guilds');
 
 // ── Safety net ────────────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ io.on('connection', (socket) => {
       registerMinesHandlers(io, socket);
       registerBlackjackHandlers(io, socket);
       registerPvpHandlers(io, socket);    // PvP — needs io for broadcasting
+      registerFriendlyHandlers(io, socket); // Guild friendly matches
       registerGuildHandlers(io, socket);
 
     } catch (err) {

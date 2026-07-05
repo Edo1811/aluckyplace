@@ -9,13 +9,14 @@ let cdTimer       = null;
 let cdVal         = 30;
 let myBet         = 0;
 let onMatchStart  = null;
+let friendlyId    = null;
 
-export function renderMatchmaking(app, game, onStart) {
-  console.log('renderMatchmaking called', game); // ADD THIS
+export function renderMatchmaking(app, game, onStart, opts = null) {
   currentGame  = game;
   onMatchStart = onStart;
   elapsed      = 0;
   matchId      = null;
+  friendlyId   = opts && opts.friendly ? opts.friendlyId : null;
 
   app.innerHTML = `
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
@@ -133,21 +134,27 @@ export function renderMatchmaking(app, game, onStart) {
 bindUI();
 bindSocket();
 
-// Join the queue. socket.js already authenticates the socket once on
-// connect — we must NOT re-emit 'auth' here. On an already-authenticated
-// socket, the server would re-register every game/pvp handler a second
-// time (see index.js), which is what was breaking matchmaking and the
-// solo games. If the socket somehow isn't authenticated yet (e.g. this
-// page opened before the initial connect/auth handshake finished), wait
-// for the 'auth:ok' that socket.js's own connect flow will produce.
-if (socket.connected && store.isAuthenticated) {
-  socket.emit('pvp:queue:join', { game });
-  startElapsed();
-} else {
-  socket.once('auth:ok', () => {
+// Friendly (guild) match: no queue — the match already exists server-side.
+// Signal we're mounted & listening so the server can start once BOTH are in.
+if (friendlyId) {
+  const t = document.querySelector('#queueScreen .big-title'); if (t) t.textContent = 'Starting friendly match…';
+  const stats = document.querySelector('#queueScreen .q-stats'); if (stats) stats.style.display = 'none';
+  const cancel = document.getElementById('cancelBtn'); if (cancel) cancel.style.display = 'none';
+  const el = document.getElementById('elapsedDisplay'); if (el) el.textContent = 'Waiting for both players…';
+}
+
+const enterOrJoin = () => {
+  if (friendlyId) {
+    socket.emit('friendly:enter', { friendly_id: friendlyId });
+  } else {
     socket.emit('pvp:queue:join', { game });
     startElapsed();
-  });
+  }
+};
+if (socket.connected && store.isAuthenticated) {
+  enterOrJoin();
+} else {
+  socket.once('auth:ok', enterOrJoin);
 }
 }
 

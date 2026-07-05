@@ -19,6 +19,7 @@ import { renderUno }        from './pages/game-uno.js';
 import { renderShop }       from './pages/shop.js';
 import { renderProfile }    from './pages/profile.js';
 import { renderSocial }     from './pages/social.js';
+import { renderGuild }      from './pages/guild.js';
 
 const app = document.getElementById('app');
 
@@ -50,10 +51,11 @@ export function navigate(page, data) {
   // Matchmaking routes — format: 'matchmaking-coinflip'
   if (page.startsWith('matchmaking-')) {
     const game = page.replace('matchmaking-', '');
+    const opts = data && data.friendly ? { friendly: true, friendlyId: data.friendlyId } : null;
     return renderMatchmaking(app, game, (matchData) => {
       // Called by matchmaking when pvp:start fires
       navigate('pvp-' + game, matchData);
-    });
+    }, opts);
   }
 
   // PvP game routes — format: 'pvp-coinflip'
@@ -84,6 +86,7 @@ export function navigate(page, data) {
     case 'shop':           return renderShop(app, data);
     case 'profile':        return renderProfile(app);
     case 'social':         return renderSocial(app);
+    case 'guild':          return renderGuild(app, data);
     default:               return renderHome(app);
   }
 }

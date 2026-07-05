@@ -108,12 +108,14 @@ module.exports = function makeGuildRouter(io) {
         [guildId]
       );
 
+      const today = new Date().toISOString().slice(0, 10);
       const members = await Promise.all(mr.rows.map(async (m) => ({
         user_id: m.user_id,
         username: m.username,
         cc_balance: Number(m.cc_balance),
         cosmetics: m.cosmetics,
         joined_at: m.joined_at,
+        donations_today: String(m.last_donation_reset).slice(0, 10) < today ? 0 : m.donations_recv_today,
         is_owner: m.user_id === g.owner_id,
         online: (await redis.exists(`presence:${m.user_id}`)) === 1,
       })));
@@ -506,6 +508,70 @@ module.exports = function makeGuildRouter(io) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('[guilds/donate]', e.message);
       res.status(500).json({ error: 'Failed to donate' });
+    } finally {
+      client.release();
+    }
+  });
+
+  // ── PATCH /guilds/:id — owner edits name/tag/description/privacy ────────────
+  router.patch('/guilds/:id', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    const { name, tag, description, is_private } = req.body || {};
+    try {
+      const g = await query(`SELECT owner_id FROM guilds WHERE id = $1`, [guildId]);
+      if (!g.rows.length) return res.status(404).json({ error: 'Guild not found' });
+      if (g.rows[0].owner_id !== req.user.userId) return res.status(403).json({ error: 'Owner only' });
+
+      if (name !== undefined && (!name || String(name).length > 64)) return res.status(400).json({ error: 'Name must be 1–64 chars' });
+      if (tag !== undefined && (!tag || String(tag).length > 8)) return res.status(400).json({ error: 'Tag must be 1–8 chars' });
+
+      const sets = [];
+      const vals = [];
+      let i = 1;
+      if (name !== undefined)        { sets.push(`name = $${i++}`);        vals.push(name); }
+      if (tag !== undefined)         { sets.push(`tag = $${i++}`);         vals.push(tag); }
+      if (description !== undefined) { sets.push(`description = $${i++}`);  vals.push(description || null); }
+      if (is_private !== undefined)  { sets.push(`is_private = $${i++}`);   vals.push(!!is_private); }
+      if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+
+      vals.push(guildId);
+      const upd = await query(
+        `UPDATE guilds SET ${sets.join(', ')} WHERE id = $${i}
+         RETURNING id, name, tag, description, is_private`,
+        vals
+      );
+      res.json({ guild: upd.rows[0] });
+    } catch (e) {
+      if (e.code === '23505') return res.status(409).json({ error: 'That name or tag is already taken' });
+      console.error('[guilds/patch]', e.message);
+      res.status(500).json({ error: 'Failed to update guild' });
+    }
+  });
+
+  // ── POST /guilds/:id/disband — owner deletes the guild ─────────────────────
+  router.post('/guilds/:id/disband', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    const client = await getClient();
+    try {
+      const g = await client.query(`SELECT owner_id FROM guilds WHERE id = $1`, [guildId]);
+      if (!g.rows.length) { client.release(); return res.status(404).json({ error: 'Guild not found' }); }
+      if (g.rows[0].owner_id !== req.user.userId) { client.release(); return res.status(403).json({ error: 'Owner only' }); }
+
+      await client.query('BEGIN');
+      // Explicit dependent deletes so this works regardless of FK cascade config.
+      await client.query(`DELETE FROM guild_join_requests WHERE guild_id = $1`, [guildId]);
+      await client.query(`DELETE FROM guild_fund_contributions WHERE guild_id = $1`, [guildId]);
+      await client.query(`DELETE FROM donations WHERE guild_id = $1`, [guildId]);
+      await client.query(`DELETE FROM guild_members WHERE guild_id = $1`, [guildId]);
+      await client.query(`DELETE FROM guilds WHERE id = $1`, [guildId]);
+      await client.query('COMMIT');
+
+      io.to(`guild:${guildId}`).emit('guild:disbanded', { guild_id: guildId });
+      res.json({ status: 'disbanded' });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[guilds/disband]', e.message);
+      res.status(500).json({ error: 'Failed to disband guild' });
     } finally {
       client.release();
     }

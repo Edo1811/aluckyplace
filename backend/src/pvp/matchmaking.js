@@ -216,6 +216,42 @@ function createMatch(io, game, p1, p2) {
   }, 30000);
 }
 
+// ── Friendly (guild) match ──────────────────────────────────────────────────
+// Bets are pre-agreed and fixed, both clients are already sitting on a
+// (queue-less) matchmaking screen listening, so we skip the betting
+// negotiation entirely and lock immediately. Because bets never pass through
+// pvp:bet:set, the 35% cap is bypassed by construction — exactly what a
+// guild friendly is meant to allow.
+function launchFriendlyMatch(io, game, p1, p2, bet) {
+  const matchId = uuidv4();
+  const match = {
+    matchId, game,
+    player1: p1, player2: p2,
+    bet1: bet, bet2: bet,
+    ready1: true, ready2: true,
+    phase: 'betting',
+    friendly: true,
+    state: {},
+    move1: null, move2: null,
+    bettingTimer: null, turnTimer: null,
+  };
+  matches.set(matchId, match);
+  userMatch.set(p1.userId, matchId);
+  userMatch.set(p2.userId, matchId);
+
+  const s1 = userSocket.get(p1.userId);
+  const s2 = userSocket.get(p2.userId);
+  if (s1) s1.emit('pvp:matched', { match_id: matchId, opponent: { username: p2.username, cc_balance: p2.ccBalance }, friendly: true });
+  if (s2) s2.emit('pvp:matched', { match_id: matchId, opponent: { username: p1.username, cc_balance: p1.ccBalance }, friendly: true });
+
+  lockBets(io, match); // deduct both → pvp:both_ready → startGame → pvp:start
+}
+
+// True if the user is currently in a live match (used to block friendly challenges).
+function isBusy(userId) {
+  return userMatch.has(userId);
+}
+
 function broadcastBettingState(io, match) {
   const { matchId, player1, player2, bet1, bet2, ready1, ready2 } = match;
   const s1 = userSocket.get(player1.userId);
@@ -770,3 +806,5 @@ module.exports.userSocket = userSocket;  // ADD THIS
 module.exports.router = router;
 module.exports.getBracket = getBracket;
 module.exports.capBet = capBet;
+module.exports.launchFriendlyMatch = launchFriendlyMatch;
+module.exports.isBusy = isBusy;
