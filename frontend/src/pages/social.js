@@ -76,6 +76,8 @@ export async function renderSocial(app) {
 function inject(app) {
   app.innerHTML = `
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cinzel@5/index.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/dancing-script@5/index.css">
     <style>
       ${COSMETIC_PREVIEW_KEYFRAMES}
       *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
