@@ -43,11 +43,12 @@ const app    = express();
 const server = http.createServer(app);
 
 const allowedOrigins = (origin, callback) => {
+  // FRONTEND_URL may be a comma-separated list of origins
   const allowed = [
-    process.env.FRONTEND_URL,
+    ...(process.env.FRONTEND_URL || '').split(','),
     'http://localhost:5173',
-  ].filter(Boolean);
-  if (!origin || allowed.some(o => origin.startsWith(o.replace(/\/$/, '')))) {
+  ].map(o => o.trim().replace(/\/$/, '')).filter(Boolean);
+  if (!origin || allowed.includes(origin)) {
     callback(null, true);
   } else {
     callback(new Error('Not allowed by CORS'));
