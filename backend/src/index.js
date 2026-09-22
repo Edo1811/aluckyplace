@@ -119,7 +119,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, async () => {
   console.log(`[server] Listening on port ${PORT}`);
   try { await query('SELECT 1'); console.log('[DB] Connected to Neon ✓'); }
