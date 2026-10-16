@@ -74,7 +74,7 @@ export function renderBlackjack(app) {
   const change = () => shell.bet({ onPlace: deal });
 
   on(socket, {
-    'blackjack:resume': ({ bet: b, split_count }) => { bet = Number(b); staked = bet * (1 + (Number(split_count) || 0)); toast('Back to your unfinished hand', 'amber'); },
+    'blackjack:resume': ({ bet: b, staked: st }) => { bet = Number(b); staked = Number(st) || bet; toast('Back to your unfinished hand', 'amber'); },
     'blackjack:state': (st) => {
       busy = false; live = true;
       syncBalance(st.cc_balance);
@@ -86,7 +86,7 @@ export function renderBlackjack(app) {
       paint({ player_hands: r.player_hands.map((h) => h.hand), dealer_hand: r.dealer_hand, results: r.player_hands });
       $('bjdv').textContent = r.dealer_total;
       shell.actions('');
-      const net = Number(r.total_payout) - staked;
+      const net = r.total_bet !== undefined ? Number(r.net) : Number(r.total_payout) - staked;
       const top = r.player_hands[0] || {};
       const sub = r.player_hands.length > 1
         ? r.player_hands.map((h) => `${h.total} ${h.outcome}`).join(' · ') + ` vs ${r.dealer_total}`

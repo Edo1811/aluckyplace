@@ -6,6 +6,12 @@
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#050505;--em:#10b981;--gold:#D4AF37;--red:#ef4444;--amber:#f59e0b;--pf:'Playfair Display',Georgia,serif;--line:rgba(255,255,255,.06);--card:rgba(255,255,255,.028)}
 html,body{background:var(--bg)}
+/* app shell never scrolls or bounces (pages scroll inside .scroll); no double-tap zoom anywhere */
+html{height:100%;overflow:hidden;overscroll-behavior:none;touch-action:manipulation;-webkit-text-size-adjust:100%}
+body{position:fixed;inset:0;overflow:hidden;overscroll-behavior:none}
+*{-webkit-tap-highlight-color:transparent}
+.glayer{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.glayer input{-webkit-user-select:text;user-select:text}
 body{color:#fff;font-family:var(--pf);font-variant-numeric:lining-nums}
 button{font-family:inherit;color:inherit}
 input,textarea{font-family:inherit}

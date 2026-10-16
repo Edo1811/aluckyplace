@@ -78,7 +78,7 @@ function registerBlackjackHandlers(io, socket) {
     if (activeGames.has(userId)) {
       // Unfinished hand from before a page leave — resume it.
       const g = activeGames.get(userId);
-      socket.emit('blackjack:resume', { bet: g.bet, split_count: g.splitCount });
+      socket.emit('blackjack:resume', { bet: g.bet, staked: g.handBets.reduce((a, b) => a + b, 0) });
       return emitState(socket, g);
     }
 
@@ -104,6 +104,7 @@ function registerBlackjackHandlers(io, socket) {
       const gameData = {
         userId, bet, seed, hash, nonce, shoe, idx,
         playerHands: [playerHand],
+        handBets: [bet],      // stake per hand (splits add hands, doubles double one hand)
         activeHandIdx: 0,
         splitCount: 0,
         dealerHand,
@@ -179,16 +180,22 @@ function registerBlackjackHandlers(io, socket) {
 
       } else if (action === 'double') {
         if (hand.length !== 2) return;
-        // Deduct extra bet
+        const extraAmt = game.handBets[game.activeHandIdx];
         const extra = await query(
           `UPDATE users SET cc_balance = cc_balance - $1 WHERE id = $2 AND cc_balance >= $1 RETURNING cc_balance`,
-          [game.bet, userId]
+          [extraAmt, userId]
         );
         if (extra.rows.length === 0) return socket.emit('blackjack:error', { message: 'Insufficient balance for double' });
-        game.bet *= 2;
+        game.handBets[game.activeHandIdx] += extraAmt;
         game.cc_balance = extra.rows[0].cc_balance;
         hand.push(draw());
-        await settleGame(socket, game, 'resolve');
+        // a doubled hand gets exactly one card — move on to the next split hand, or settle
+        if (game.activeHandIdx < game.playerHands.length - 1) {
+          game.activeHandIdx++;
+          emitState(socket, game);
+        } else {
+          await settleGame(socket, game, 'resolve');
+        }
 
       } else if (action === 'split') {
         if (hand.length !== 2 || hand[0].rank !== hand[1].rank || game.splitCount >= 2) return;
@@ -198,6 +205,7 @@ function registerBlackjackHandlers(io, socket) {
           [game.bet, userId]
         );
         if (extra.rows.length === 0) return socket.emit('blackjack:error', { message: 'Insufficient balance for split' });
+        game.handBets.splice(game.activeHandIdx + 1, 0, game.bet);
         game.cc_balance = extra.rows[0].cc_balance;
         game.splitCount++;
         // Split the hand
@@ -229,7 +237,9 @@ function emitState(socket, game) {
 }
 
 async function settleGame(socket, game, reason) {
-  const { userId, bet, seed, hash, nonce, dealerHand, playerHands } = game;
+  const { userId, seed, hash, nonce, dealerHand, playerHands } = game;
+  const handBets = game.handBets || playerHands.map(() => game.bet);
+  const totalBet = handBets.reduce((a, b) => a + b, 0);
   activeGames.delete(userId);
 
   // Dealer draws
@@ -248,7 +258,8 @@ async function settleGame(socket, game, reason) {
 
   // Calculate payout per hand
   let totalPayout = 0;
-  const results = playerHands.map(hand => {
+  const results = playerHands.map((hand, i) => {
+    const bet = handBets[i];
     const total = handTotal(hand);
     let outcome, payout;
 
@@ -261,7 +272,7 @@ async function settleGame(socket, game, reason) {
     else { outcome = 'loss'; payout = 0; }
 
     totalPayout += payout;
-    return { hand, total, outcome, payout };
+    return { hand, total, outcome, payout, bet };
   });
 
   const client = await getClient();
@@ -276,12 +287,12 @@ async function settleGame(socket, game, reason) {
       finalBalance = credit.rows[0].cc_balance;
     }
     await recordResult(client, {
-      userId, game: 'blackjack', betAmount: bet, payoutAmount: totalPayout,
+      userId, game: 'blackjack', betAmount: totalBet, payoutAmount: totalPayout,
       seed, hash, nonce,
       extra: { results: results.map(r => ({ outcome: r.outcome, total: r.total, payout: r.payout })), dealer_total: dealerTotal },
     });
     await recordSoloResult(client, {
-      userId, game: 'blackjack', betAmount: bet, payoutAmount: totalPayout, ccBalanceAfter: finalBalance,
+      userId, game: 'blackjack', betAmount: totalBet, payoutAmount: totalPayout, ccBalanceAfter: finalBalance,
     });
     await client.query('COMMIT');
     client.release();
@@ -291,7 +302,8 @@ async function settleGame(socket, game, reason) {
       dealer_hand:  dealerHand,
       dealer_total: dealerTotal,
       total_payout: totalPayout,
-      net:          totalPayout - bet,
+      total_bet:    totalBet,
+      net:          totalPayout - totalBet,
       seed, cc_balance: finalBalance,
     });
 

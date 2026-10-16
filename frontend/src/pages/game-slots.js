@@ -13,15 +13,17 @@ export function renderSlots(app) {
     id: 'slots', title: 'Slots',
     stage: `<canvas class="fill" id="cvS"></canvas>
       <div class="lever" id="slLev"><div class="lknob" id="slKnob"></div></div>
+      <div class="tag" id="slSess"></div>
       <div class="hint" id="slTag">Pull the lever · tap a reel to slam it to a stop</div>`,
   });
 
-  let bet = 0, spin = false, res = null, geo = null, ready = false;
+  let bet = 0, spin = false, res = null, geo = null, ready = false, inflight = false;
+  let sNet = 0, spins = 0, best = 0, lastSeed = null; // session across pulls
   const pos = [0, 1, 2], from = [0, 1, 2], to = [0, 1, 2], el = [0, 0, 0], dur = [1, 1, 1], tgt = [0, 0, 0];
 
   const lev = $('slLev'), knob = $('slKnob');
   pullGesture(lev, 118, {
-    onStart: () => ready && !spin,
+    onStart: () => ready && !inflight,
     onMove: (p) => { knob.style.top = `${5 + p}px`; },
     onRelease: (p) => {
       knob.style.transition = 'top .4s cubic-bezier(.2,1.4,.4,1)'; knob.style.top = '5px';
@@ -30,6 +32,7 @@ export function renderSlots(app) {
     },
   });
   const cv = $('cvS'); cv.style.touchAction = 'none';
+  cv.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
   cv.addEventListener('pointerdown', (e) => {
     if (!spin || !geo) return;
     const r = cv.getBoundingClientRect(), i = Math.floor((e.clientX - r.left - geo.x0) / (geo.rw + geo.gap));
@@ -37,19 +40,28 @@ export function renderSlots(app) {
   });
 
   async function pull(power) {
-    ready = false;
+    if (inflight) return;
+    if (spin) slamAll(); // pulling mid-spin lands the current spin instantly, then spins again
+    inflight = true;
     const tag = $('slTag'); tag.textContent = 'Spinning…'; tag.style.color = ''; tag.style.fontSize = '';
-    try { res = await api.post('/games/slots/spin', { amount: bet }); } catch (e) { toast(e.message, 'red'); ready = true; tag.textContent = 'Pull the lever'; return; }
-    syncBalance(Number(res.cc_balance) - Number(res.payout)); // show the stake leaving now, the win when reels land
+    let r;
+    try { r = await api.post('/games/slots/spin', { amount: bet }); } catch (e) { toast(e.message, 'red'); inflight = false; tag.textContent = 'Pull the lever'; return; }
+    if (spin) slamAll(); // a slam may have been mid-flight while we waited
+    res = r; inflight = false;
+    syncBalance(Number(res.cc_balance) - Number(res.payout)); // stake leaves now, the win lands with the reels
     for (let i = 0; i < 3; i++) {
       tgt[i] = SYMS.indexOf(res.reels[i]);
       from[i] = pos[i];
-      const base = Math.floor(from[i]) + Math.round(10 + power * 34) + i * 7;
+      const base = Math.floor(from[i]) + Math.round(8 + power * 26) + i * 6;
       to[i] = base + (((tgt[i] - base) % N) + N) % N;
-      el[i] = 0; dur[i] = 0.9 + power * 1.9 + i * 0.42 + (res.nearMiss && i === 2 ? 0.9 : 0);
+      el[i] = 0; dur[i] = 0.7 + power * 1.3 + i * 0.32 + (res.nearMiss && i === 2 ? 0.7 : 0);
     }
     spin = true;
-    tag.textContent = 'Tap a reel to slam it';
+    tag.textContent = 'Tap a reel to slam it · pull again anytime';
+  }
+  function slamAll() {
+    for (let i = 0; i < 3; i++) { pos[i] = to[i]; el[i] = dur[i]; }
+    spin = false; landed();
   }
   function slam(i) {
     if (el[i] >= dur[i]) return;
@@ -59,18 +71,31 @@ export function renderSlots(app) {
   function landed() {
     syncBalance(res.cc_balance);
     const m = Number(res.multiplier), tag = $('slTag');
-    tag.textContent = m ? `${res.reels.map((s) => GLYPH[s]).join(' ')} · ${m}× · +${fmt(res.payout)} CC` : res.nearMiss ? 'So close' : 'No match this time';
+    tag.textContent = m ? `${res.reels.map((x) => GLYPH[x]).join(' ')} · ${m}× · +${fmt(res.payout)} CC` : res.nearMiss ? 'So close' : 'No match this time';
     tag.style.color = m ? (m >= 40 ? GOLD : EM) : 'rgba(255,255,255,.3)'; tag.style.fontSize = '13px';
-    const r = res;
-    later(1600, () => shell.result({
-      net: Number(r.net), sub: m ? `${m}× on ${r.reels.map((s) => GLYPH[s]).join(' ')}` : 'No match', seed: r.seed,
-      again: () => start(bet), change,
-    }));
+    sNet += Number(res.net); spins++; best = Math.max(best, m); lastSeed = res.seed;
+    hud();
+  }
+  function hud() {
+    const t = $('slSess'); if (!t) return;
+    t.textContent = spins ? `${spins} ${spins === 1 ? 'spin' : 'spins'} · ${sNet > 0 ? '+' : sNet < 0 ? '−' : ''}${fmt(Math.abs(sNet))} CC` : '';
+    t.style.color = sNet > 0 ? EM : sNet < 0 ? 'rgba(239,68,68,.75)' : 'rgba(255,255,255,.26)';
+    const d = $('slDone'); if (d) d.disabled = !spins;
+  }
+  function done() {
+    if (spin) slamAll();
+    const finish = () => {
+      if (inflight) return later(120, finish);
+      shell.result({ net: sNet, sub: `${spins} ${spins === 1 ? 'spin' : 'spins'}${best ? ` · best ${best}×` : ''}`, seed: lastSeed, again: () => start(bet), change });
+    };
+    finish();
   }
   function start(b) {
-    bet = b; res = null; spin = false; ready = true;
+    bet = b; res = null; spin = false; ready = true; sNet = 0; spins = 0; best = 0; lastSeed = null;
     const tag = $('slTag'); tag.textContent = 'Pull the lever · tap a reel to slam it to a stop'; tag.style.color = ''; tag.style.fontSize = '';
-    shell.actions(''); shell.show('scPlay');
+    shell.actions('<button class="ga" id="slDone" disabled>Done</button>');
+    $('slDone').onclick = done;
+    shell.show('scPlay'); hud();
   }
   const change = () => shell.bet({ onPlace: start });
 

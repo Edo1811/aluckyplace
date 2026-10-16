@@ -36,6 +36,10 @@ export function pressPad(el, { down, up }) {
 /** Vertical pull gesture (lever, throw pad). onMove(pull), onRelease(pull). */
 export function pullGesture(el, max, { onStart, onMove, onRelease }) {
   el.style.touchAction = 'none';
+  // iOS Safari can still scroll/bounce the page under a drag — swallow the raw touches
+  const stop = (e) => { if (e.cancelable) e.preventDefault(); };
+  el.addEventListener('touchstart', stop, { passive: false });
+  el.addEventListener('touchmove', stop, { passive: false });
   let down = false, y0 = 0, pull = 0;
   el.addEventListener('pointerdown', (e) => {
     if (onStart && onStart() === false) return;
