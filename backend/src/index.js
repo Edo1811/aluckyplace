@@ -119,10 +119,20 @@ io.on('connection', (socket) => {
   });
 });
 
+// Idempotent schema upgrades, applied before we take traffic so a deploy never
+// serves code that reads columns the database doesn't have yet.
+async function ensureSchema() {
+  try {
+    await query(`ALTER TABLE guilds ADD COLUMN IF NOT EXISTS icon    VARCHAR(16) NOT NULL DEFAULT '🏰'`);
+    await query(`ALTER TABLE guilds ADD COLUMN IF NOT EXISTS icon_bg VARCHAR(9)  NOT NULL DEFAULT '#10b981'`);
+    console.log('[DB] Schema up to date ✓');
+  } catch (err) { console.error('[DB] Schema upgrade failed:', err.message); }
+}
+
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, async () => {
+ensureSchema().then(() => server.listen(PORT, async () => {
   console.log(`[server] Listening on port ${PORT}`);
-  try { await query('SELECT 1'); console.log('[DB] Connected to Neon ✓'); }
+  try { await query('SELECT 1'); console.log('[DB] Connected ✓'); }
   catch (err) { console.error('[DB] Connection failed:', err.message); }
   try { const ok = await redisPing(); console.log('[Redis] Connected to Upstash', ok ? '✓' : '(unexpected)'); }
   catch (err) { console.error('[Redis] Connection failed:', err.message); }
@@ -130,6 +140,6 @@ server.listen(PORT, async () => {
   // ── Phase 8 cron jobs ─────────────────────────────────────────────────────
   require('./jobs/weekly-badge').start();
   require('./jobs/hos-cleanup').start();
-});
+}));
 
 module.exports = { app, io };

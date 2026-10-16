@@ -1,7 +1,7 @@
 -- ============================================================
 -- A "lucky" place — guild crest (icon + background colour)
--- Run once in your Neon SQL console, after 002_phase8.sql,
--- BEFORE deploying the backend that selects these columns.
+-- The backend also applies this automatically on startup (ensureSchema in
+-- src/index.js), so running it by hand is optional.
 -- ============================================================
 
 ALTER TABLE guilds ADD COLUMN IF NOT EXISTS icon    VARCHAR(16) NOT NULL DEFAULT '🏰';
