@@ -30,7 +30,14 @@ function registerMinesHandlers(io, socket) {
     const userId = socket.user.userId;
     bet = Math.floor(Number(bet));
     if (!Number.isFinite(bet) || bet < 10) return socket.emit('mines:error', { message: 'Minimum bet is 10 CC' });
-    if (activeGames.has(userId)) return socket.emit('mines:error', { message: 'Game already in progress' });
+    if (activeGames.has(userId)) {
+      // Player left mid-round (navigated away / refreshed) — hand the board back instead of locking them out.
+      const g = activeGames.get(userId);
+      return socket.emit('mines:resume', {
+        bet: g.bet, picks: g.picks, revealed: [...g.revealed], hash: g.hash,
+        multiplier: MULTIPLIERS[g.picks], cc_balance: g.cc_balance,
+      });
+    }
 
     try {
       const deduct = await query(

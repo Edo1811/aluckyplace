@@ -1,260 +1,312 @@
 import { api } from '../api.js';
 import { store, setUser, updateBalance } from '../store.js';
+import {
+  $, fmt, esc, listen, toast, dockHTML, bindNav, playerFrame, playerName, playerBadge,
+  emitBalance, onLeave, bindBalance,
+} from '../ui/core.js';
+import { GAME_BY_ID, gameName } from '../ui/games-meta.js';
 
-const DAILY_REWARDS = [100, 200, 250, 300, 400, 500, 750, 800, 1000];
-function rewardForDay(day) { return DAILY_REWARDS[Math.min(day - 1, 8)]; }
+const REWARDS = [100, 200, 250, 300, 400, 500, 750, 800, 1000];
+const rewardFor = (day) => REWARDS[Math.min(Math.max(day, 1), 9) - 1];
 
-let dailyState = null;
-let claimedNow = false;
+const CSS = `
+.app{--ac:#10b981;--acr:16,185,129}
+.app.broke{--ac:#ef4444;--acr:239,68,68}
+.who{display:flex;align-items:center;gap:10px;padding:12px 14px 2px}
+.who .wn{flex:1;min-width:0}
+.who .wl{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.25)}
+.who .wrow{display:flex;align-items:center;gap:6px;margin-top:2px}
+.tok{display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:20px;background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.22);font-size:13px;font-weight:700;color:var(--gold)}
+.coin{width:16px;height:16px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff3c4,#D4AF37 60%,#8a6b15);color:#3a2a00;font-style:normal;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center;font-weight:900}
+.hero{position:relative;margin:12px 12px 0;padding:24px 18px 0;border-radius:22px;border:1px solid rgba(var(--acr),.16);background:radial-gradient(120% 80% at 50% 0%,rgba(var(--acr),.13),rgba(var(--acr),0) 70%),#070707;overflow:hidden;text-align:center;transition:border-color .5s}
+.h-l{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:rgba(255,255,255,.3)}
+.odo{--dh:84px;font-variant-numeric:lining-nums tabular-nums;display:flex;justify-content:center;align-items:flex-start;margin-top:2px;font-size:62px;font-weight:700;letter-spacing:-.02em;height:var(--dh);overflow:hidden;transition:color .6s}
+.odo .d{display:block;height:var(--dh);overflow:hidden}
+.odo .d span{display:block;transition:transform .9s cubic-bezier(.2,.9,.25,1)}
+.odo .d span b{display:block;height:var(--dh);line-height:var(--dh)}
+.odo .sep{display:block;height:var(--dh);line-height:var(--dh)}
+.odo .unit{font-size:18px;color:rgba(255,255,255,.3);margin-left:8px;line-height:var(--dh);padding-top:10px;font-weight:400;letter-spacing:.06em}
+.app.broke .odo{color:rgba(255,255,255,.14)}
+.delta{display:inline-flex;align-items:center;gap:6px;margin-top:4px;font-size:12.5px;font-weight:700;padding:4px 11px;border-radius:14px;background:rgba(16,185,129,.1);color:var(--em)}
+.delta.neg{background:rgba(239,68,68,.1);color:#f87171}
+.delta.flat{background:rgba(255,255,255,.05);color:rgba(255,255,255,.4)}
+.hspark{height:84px;margin:14px -18px 0;position:relative}
+.hspark canvas{position:absolute;inset:0;width:100%;height:100%}
+.brokeline{font-size:13px;font-style:italic;color:rgba(239,68,68,.6);margin-top:6px;display:none}
+.app.broke .brokeline{display:block}
+.app.broke .delta{display:none}
+.daily{margin:12px 12px 0;padding:16px;border-radius:18px;border:1px solid var(--line);background:var(--card)}
+.d-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.d-t{font-size:16px;font-weight:700}
+.d-s{font-size:11.5px;color:rgba(255,255,255,.34);margin-top:3px}
+.d-amt{font-size:22px;font-weight:700;color:var(--ac);white-space:nowrap}
+.d-amt small{font-size:11px;color:rgba(255,255,255,.3);font-weight:400}
+.track{display:grid;grid-template-columns:repeat(9,1fr);gap:4px;margin:16px 0 14px}
+.pip{display:flex;flex-direction:column;align-items:center;gap:6px}
+.pip i{width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,.07);position:relative;overflow:hidden}
+.pip.done i{background:var(--ac)}
+.pip.today i{background:rgba(var(--acr),.28)}
+.pip.today i::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);animation:pipShine 1.8s ease-in-out infinite}
+@keyframes pipShine{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.pip span{font-size:9px;color:rgba(255,255,255,.24)}
+.pip.today span{color:var(--ac);font-weight:700}
+.pip.done span{color:rgba(255,255,255,.45)}
+.claim{width:100%;padding:15px;border-radius:14px;border:none;background:var(--ac);color:#03150e;font-size:15px;font-weight:700;cursor:pointer}
+.app.broke .claim{color:#1a0303}
+.claim:disabled{background:rgba(255,255,255,.05);color:rgba(255,255,255,.4);cursor:default;border:1px solid rgba(255,255,255,.08)}
+.claim .cd{font-variant-numeric:tabular-nums}
+.brokecard{display:none;margin:12px 12px 0;padding:22px 18px;border-radius:18px;border:1px solid rgba(239,68,68,.22);background:linear-gradient(160deg,rgba(239,68,68,.09),rgba(239,68,68,.02));text-align:center}
+.app.broke .brokecard{display:block}
+.brokecard h3{font-size:26px;color:#f87171}
+.brokecard p{font-size:12.5px;color:rgba(255,255,255,.4);margin-top:6px;line-height:1.55}
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.stk{border-radius:16px;border:1px solid var(--line);background:var(--card);padding:14px;position:relative;overflow:hidden}
+.stk .sg{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.3)}
+.stk .sn{font-size:34px;font-weight:700;color:var(--ac);line-height:1;margin-top:6px}
+.stk .sn small{font-size:13px;color:rgba(255,255,255,.3);font-weight:400;margin-left:3px}
+.stk .sf{font-size:11px;font-style:italic;color:rgba(255,255,255,.34);margin-top:6px;line-height:1.35}
+.stk .flames{position:absolute;right:-6px;top:-6px;font-size:44px;opacity:.12;transform:rotate(12deg)}
+.app.broke .streakwrap{display:none}
+.qp{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.q{border-radius:15px;border:1px solid var(--line);background:var(--card);padding:12px 4px 10px;text-align:center;cursor:pointer;transition:border-color .15s,transform .15s;color:#fff}
+.q:hover{border-color:rgba(var(--acr),.3)}
+.q:active{transform:scale(.96)}
+.q b{display:block;font-size:24px;margin-bottom:5px}
+.q span{font-size:11.5px;font-weight:700}
+.q small{display:block;font-size:9.5px;color:rgba(255,255,255,.3);margin-top:2px}
+.app.broke .q{opacity:.35;pointer-events:none}
+.ticker{height:40px;border-top:1px solid var(--line);overflow:hidden;display:flex;align-items:center;flex-shrink:0;-webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)}
+.tk{display:flex;gap:26px;white-space:nowrap;animation:tick 60s linear infinite;padding-left:26px}
+@keyframes tick{to{transform:translateX(-50%)}}
+.ti{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:rgba(255,255,255,.45)}
+.ti b{color:#fff}
+.ti b.w{color:var(--em)}
+.ti b.l{color:#f87171}
+.ti .gm{color:rgba(255,255,255,.28)}
+.fly{position:fixed;z-index:80;font-size:20px;font-weight:700;color:var(--ac);pointer-events:none;text-shadow:0 0 14px rgba(var(--acr),.6)}
+@media(min-width:900px){
+  .cols{display:grid;grid-template-columns:1.15fr 1fr;gap:16px;padding:0 20px;align-items:start}
+  .hero,.daily,.brokecard{margin-left:0;margin-right:0}
+  .right .sec.first{margin-top:12px}
+  .odo{font-size:84px;--dh:112px}
+  .hspark{height:120px}
+}
+@media(max-width:899px){.right{padding:0 12px}}
+`;
 
-const STREAKS = [
-  { game: 'Blackjack', count: 6, flavor: '"Destroyed the dealer 6 times in a row!!"' },
-  { game: 'Coinflip',  count: 4, flavor: '"Hasn\'t lost a coinflip in 4 matches!!"'  },
-];
-
-const TICKER_EVENTS = [
-  { u:'NightRoller', g:'Crash',     a:12400, w:true  },
-  { u:'br0keboy__',  g:'Slots',     a:800,   w:false },
-  { u:'x_Ace_x',     g:'Blackjack', a:5500,  w:true  },
-  { u:'LuckyStrike', g:'Coinflip',  a:2000,  w:false },
-  { u:'GoldHands',   g:'Roulette',  a:18000, w:true  },
-  { u:'tilted99',    g:'Mines',     a:3200,  w:false },
-  { u:'CryptoKing',  g:'Crash',     a:45000, w:true  },
-  { u:'poorguy404',  g:'Slots',     a:1200,  w:false },
-  { u:'AceQueen',    g:'Duels',     a:7800,  w:true  },
-  { u:'allin4ever',  g:'Dice',      a:500,   w:false },
-];
+let daily = null, history = [], profile = null, rank = null, cdTimer = 0;
 
 export async function renderHome(app) {
-  claimedNow = false;
-  try {
-    const [meRes, dailyRes] = await Promise.all([
-      api.get('/auth/me'),
-      api.get('/daily'),
-    ]);
-    setUser({ ...meRes.user });
-    dailyState = dailyRes;
-  } catch (err) {
-    console.error('[home] failed to load:', err.message);
-  }
+  app.innerHTML = `<style>${CSS}</style><div class="page-load">Loading…</div>${dockHTML('home')}`;
+  bindNav(app);
+  const [me, d, p, h, lb, fame, shame] = await Promise.allSettled([
+    api.get('/auth/me'), api.get('/daily'),
+    api.get(`/profile/${encodeURIComponent(store.user?.username || '')}`),
+    api.get('/games/history?limit=50'), api.get('/social/leaderboard'),
+    api.get('/social/hall-of-fame'), api.get('/social/hall-of-shame'),
+  ]);
+  if (me.status === 'fulfilled') setUser({ ...me.value.user });
+  daily = d.status === 'fulfilled' ? d.value : null;
+  profile = p.status === 'fulfilled' ? p.value : null;
+  history = h.status === 'fulfilled' ? h.value.results || [] : [];
+  rank = lb.status === 'fulfilled' ? lb.value.me : null;
+  const moments = [
+    ...(fame.status === 'fulfilled' ? fame.value.entries.map((e) => ({ ...e, win: true })) : []),
+    ...(shame.status === 'fulfilled' ? shame.value.entries.map((e) => ({ ...e, win: false })) : []),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 14);
 
-  inject(app);
-  bindEvents(app);
+  if (!document.body.contains(app)) return;
+  inject(app, moments);
 }
 
-function inject(app) {
-  const cc    = store.ccBalance;
-  const broke = Number(cc) === 0;
-
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after { margin:0; padding:0; box-sizing:border-box }
-      body { background:#050505 }
-      .hp { position:relative; height:100vh; background:#050505; overflow:hidden; display:flex; flex-direction:column;
-            --ac:${broke ? '#ef4444' : '#10b981'};
-            --acl:${broke ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.13)'};
-            --acs:${broke ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.35)'};
-            font-family:'Playfair Display',Georgia,serif }
-      .body { flex:1; overflow-y:auto; padding:36px 28px 12px; display:flex; flex-direction:column; gap:18px }
-      .bal { display:flex; flex-direction:column; align-items:center; gap:4px; padding:12px 0 4px }
-      .bal-lbl { font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:rgba(255,255,255,.25) }
-      .bal-num  { font-size:76px; font-weight:700; color:${broke ? 'rgba(255,255,255,.28)' : '#fff'}; letter-spacing:-3px; line-height:1; font-family:'Playfair Display',Georgia,serif }
-      .bal-cc   { font-size:18px; color:var(--ac); letter-spacing:.06em; font-family:'Playfair Display',Georgia,serif }
-      .bal-chg  { font-size:12px; color:${broke ? 'rgba(239,68,68,.38)' : 'rgba(255,255,255,.22)'}; font-style:italic; margin-top:2px }
-      .daily { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:16px 18px; display:flex; align-items:center; gap:18px }
-      .daily.dim { opacity:.55 }
-      .daily.hidden { display:none }
-      .pips { display:flex; gap:5px; align-items:center; flex-shrink:0 }
-      .pip  { width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.1) }
-      .pip.done { background:var(--ac) }
-      .pip.cur  { background:var(--ac); box-shadow:0 0 7px var(--ac) }
-      .pip-label { font-size:9.5px; letter-spacing:.1em; color:rgba(255,255,255,.18); margin-top:5px; text-transform:uppercase }
-      .daily-info { flex:1 }
-      .daily-title { font-size:15px; font-weight:700; color:#fff; margin-bottom:3px }
-      .daily-sub   { font-size:11.5px; color:rgba(255,255,255,.3) }
-      .cbtn { padding:9px 18px; background:var(--ac); border:none; border-radius:8px; color:#fff; font-size:13px; font-weight:700; font-family:'Playfair Display',Georgia,serif; cursor:pointer; white-space:nowrap; letter-spacing:.03em }
-      .cbtn:disabled { background:rgba(255,255,255,.07); color:rgba(255,255,255,.2); cursor:not-allowed }
-      .broke-card { display:${broke ? 'block' : 'none'}; background:rgba(239,68,68,.07); border:1px solid rgba(239,68,68,.18); border-radius:14px; padding:20px; text-align:center }
-      .broke-t { font-size:22px; font-weight:700; color:#ef4444; margin-bottom:5px }
-      .broke-s { font-size:13px; color:rgba(239,68,68,.5); font-style:italic }
-      .streaks { display:${broke ? 'none' : 'grid'}; grid-template-columns:1fr 1fr; gap:12px }
-      .sk { background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.07); border-radius:12px; padding:14px 16px }
-      .sk-game { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:rgba(255,255,255,.28); margin-bottom:7px }
-      .sk-n    { font-size:32px; font-weight:700; color:var(--ac); line-height:1 }
-      .sk-lbl  { font-size:11px; color:rgba(255,255,255,.25); margin-top:1px }
-      .sk-flav { font-size:11px; color:rgba(255,255,255,.42); font-style:italic; margin-top:9px; border-top:1px solid rgba(255,255,255,.06); padding-top:9px; line-height:1.5 }
-      .ticker   { height:38px; background:rgba(255,255,255,.025); border-top:1px solid rgba(255,255,255,.05); overflow:hidden; display:flex; align-items:center; flex-shrink:0 }
-      .tk-inner { display:flex; white-space:nowrap; animation:scroll 26s linear infinite }
-      @keyframes scroll { from{transform:translateX(0)} to{transform:translateX(-50%)} }
-      .tk-i { display:inline-flex; align-items:center; gap:8px; padding:0 24px; font-size:11.5px; color:rgba(255,255,255,.4) }
-      .tw { color:#10b981 } .tl { color:#ef4444 }
-      .td { width:3px; height:3px; border-radius:50%; background:rgba(255,255,255,.12); flex-shrink:0 }
-      .dock-wrap { display:flex; justify-content:center; padding:9px 0 13px; background:#050505; flex-shrink:0 }
-      .pill { display:flex; align-items:center; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09); border-radius:40px; padding:8px 16px; gap:2px }
-      .di   { width:42px; height:42px; display:flex; align-items:center; justify-content:center; border-radius:50%; cursor:pointer; position:relative; transition:background .15s }
-      .di:hover { background:rgba(255,255,255,.07) }
-      .di.on svg { opacity:1 }
-      .di.on::after { content:''; position:absolute; bottom:-4px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:var(--ac) }
-      .di svg { opacity:.4; transition:opacity .15s }
-      .toast { position:fixed; top:18px; left:50%; transform:translateX(-50%); padding:10px 22px; border-radius:10px; font-size:13px; font-weight:700; white-space:nowrap; z-index:200; opacity:0; transition:opacity .25s; pointer-events:none; font-family:'Playfair Display',Georgia,serif }
-      .toast.green { background:rgba(16,185,129,.15); border:1px solid rgba(16,185,129,.35); color:#10b981 }
-      .toast.red   { background:rgba(239,68,68,.15);  border:1px solid rgba(239,68,68,.35);  color:#ef4444 }
-      .toast.show  { opacity:1 }
-    </style>
-
-    <div class="hp" id="hp">
-      <div class="body">
-        <div class="bal">
-          <span class="bal-lbl">Your balance</span>
-          <span class="bal-num" id="balNum">${Number(store.ccBalance).toLocaleString()}</span>
-          <span class="bal-cc">CC</span>
-          <span class="bal-chg">${broke ? "You had it all. Now you don't." : 'Live balance'}</span>
-        </div>
-
-        ${renderDailyHTML()}
-
-        <div class="broke-card">
-          <div class="broke-t">You're broke.</div>
-          <div class="broke-s">Tomorrow's daily reward is your only hope.</div>
-        </div>
-
-        <div class="streaks">
-          ${STREAKS.map(s => `
-            <div class="sk">
-              <div class="sk-game">${s.game}</div>
-              <div class="sk-n">${s.count}</div>
-              <div class="sk-lbl">win streak</div>
-              <div class="sk-flav">${s.flavor}</div>
-            </div>`).join('')}
-        </div>
-      </div>
-
-      <div class="ticker"><div class="tk-inner" id="ticker"></div></div>
-
-      <div class="dock-wrap">
-        <div class="pill">
-          <div class="di on">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7.5L9 2l7 5.5V16H2V7.5z"/><path d="M6.5 16v-5h5v5"/></svg>
-          </div>
-          <div class="di" id="nav-games">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="9" rx="2.5"/><path d="M6 9.5h2m-1-1v2"/><circle cx="12" cy="9" r=".85" fill="white"/><circle cx="13.8" cy="10.2" r=".85" fill="white"/></svg>
-          </div>
-          <div class="di" id="nav-social">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6" r="2.5"/><path d="M1.5 15c0-2.76 2.24-5 5-5s5 2.24 5 5"/><circle cx="13" cy="5.5" r="2"/><path d="M16.5 14c0-2.21-1.57-4-3.5-4"/></svg>
-          </div>
-          <div class="di" id="nav-shop">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h10l-1.2 8H5.2L4 4z"/><path d="M6.5 4c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5"/><circle cx="6.5" cy="14.5" r="1"/><circle cx="11.5" cy="14.5" r="1"/></svg>
-          </div>
-          <div class="di" id="nav-profile">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="3"/><path d="M2 16c0-3.87 3.13-7 7-7s7 3.13 7 7"/></svg>
-          </div>
-        </div>
-      </div>
-      <div class="toast" id="toast"></div>
+function inject(app, moments) {
+  const eq = profile?.equipped || null;
+  const u = store.user || {};
+  app.innerHTML = `<style>${CSS}</style>
+  <div class="scroll"><div class="wrap">
+    <div class="who">
+      ${playerFrame(u.username, eq, 44)}
+      <div class="wn"><div class="wl">Signed in as</div><div class="wrow">${playerName(u.username, eq, 18)}${playerBadge(eq)}</div></div>
+      <div class="tok"><i class="coin">A</i><span data-bal-a>${fmt(store.aBalance)}</span></div>
     </div>
-  `;
-
-  buildTicker();
-}
-
-function renderDailyHTML() {
-  if (!dailyState) return '';
-  const broke = Number(store.ccBalance) === 0;
-  const { current_streak, next_day, reward, can_claim } = dailyState;
-  const displayDay = can_claim ? next_day : current_streak;
-  const claimed    = !can_claim || claimedNow;
-  const hide       = broke && claimed;
-
-  const pipsHTML = Array.from({ length: 9 }, (_, i) => {
-    const cls = i < displayDay - 1 ? 'pip done' : i === displayDay - 1 ? 'pip cur' : 'pip';
-    return `<div class="${cls}"></div>`;
-  }).join('');
-
-  return `
-    <div class="daily${claimed ? ' dim' : ''}${hide ? ' hidden' : ''}" id="dailyCard">
-      <div style="flex-shrink:0">
-        <div class="pips">${pipsHTML}</div>
-        <div class="pip-label">Day streak</div>
-      </div>
-      <div class="daily-info">
-        <div class="daily-title" id="dailyTitle">
-          ${claimed ? `Day ${displayDay} — Claimed` : `Day ${displayDay} — Claim ${reward.toLocaleString()} CC`}
+    <div class="cols">
+      <div>
+        <div class="hero">
+          <div class="h-l">Credits</div>
+          <div class="odo" id="odo"></div>
+          <div class="delta" id="delta"></div>
+          <div class="brokeline">You had it all. Now you don't.</div>
+          <div class="hspark"><canvas id="spark"></canvas></div>
         </div>
-        <div class="daily-sub" id="dailySub">
-          ${claimed
-            ? `Come back tomorrow for ${rewardForDay(displayDay + 1).toLocaleString()} CC`
-            : broke ? 'This is all you have left.' : 'Miss tomorrow and your streak resets'}
+        <div class="brokecard">
+          <h3>You're broke.</h3>
+          <p>No bets, no loans, no safety net.<br>Tomorrow's daily reward is your only way back in.</p>
         </div>
+        <div class="daily" id="daily"></div>
       </div>
-      <button class="cbtn" id="claimBtn" ${claimed ? 'disabled' : ''}>${claimed ? 'Claimed' : 'Claim'}</button>
-    </div>`;
+      <div class="right">
+        <div class="streakwrap" id="streakwrap"></div>
+        <div class="sec">Jump back in</div>
+        <div class="qp" id="qp"></div>
+        <div class="sec">Recent</div>
+        <div class="sgrid" id="today"></div>
+      </div>
+    </div>
+    <div style="height:18px"></div>
+  </div></div>
+  ${moments.length ? `<div class="ticker"><div class="tk">${tickerHTML(moments)}${tickerHTML(moments)}</div></div>` : ''}
+  ${dockHTML('home')}`;
+  bindNav(app);
+  bindBalance();
+
+  applyBroke();
+  setOdo(store.ccBalance, true);
+  renderDelta();
+  drawSpark();
+  renderDaily();
+  renderSide();
+
+  listen(window, 'resize', () => { drawSpark(); setOdo(store.ccBalance, true); });
+  listen(document, 'balance:updated', () => { applyBroke(); setOdo(store.ccBalance); drawSpark(); });
+  if (document.fonts) document.fonts.ready.then(() => { if ($('odo')) setOdo(store.ccBalance, true); });
+  onLeave(() => clearInterval(cdTimer));
 }
 
-function buildTicker() {
-  const el = document.getElementById('ticker');
-  if (!el) return;
-  const items = [...TICKER_EVENTS, ...TICKER_EVENTS];
-  el.innerHTML = items.map(e => `
-    <span class="tk-i">
-      <span class="${e.w ? 'tw' : 'tl'}">${e.w ? '▲' : '▼'}</span>
-      <span style="color:rgba(255,255,255,.65);font-weight:600">${e.u}</span>
-      <span style="color:rgba(255,255,255,.22)">${e.g}</span>
-      <span class="${e.w ? 'tw' : 'tl'}">${e.w ? '+' : '-'}${e.a.toLocaleString()} CC</span>
-      <span class="td"></span>
-    </span>`).join('');
+const isBroke = () => Number(store.ccBalance) <= 0;
+function applyBroke() { document.querySelector('.app')?.classList.toggle('broke', isBroke()); }
+
+// ── odometer ────────────────────────────────────────────────────────────────
+function setOdo(v, instant) {
+  const el = $('odo'); if (!el) return;
+  const want = fmt(v).split('');
+  if (el.dataset.len !== String(want.length)) {
+    el.innerHTML = want.map((ch) => ch === ','
+      ? '<span class="sep">,</span>'
+      : `<span class="d"><span>${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<b>${n}</b>`).join('')}</span></span>`).join('') + '<span class="unit">CC</span>';
+    el.dataset.len = want.length; instant = true;
+  }
+  const digits = [...el.querySelectorAll('.d > span')];
+  const h = el.querySelector('.d')?.offsetHeight || 84;
+  let k = 0;
+  want.forEach((ch) => {
+    if (ch === ',') return;
+    const sp = digits[k++];
+    if (instant) { sp.style.transition = 'none'; requestAnimationFrame(() => { sp.style.transition = ''; }); }
+    sp.style.transform = `translateY(-${Number(ch) * h}px)`;
+  });
 }
 
-function showToast(msg, type = 'green') {
-  const el = document.getElementById('toast');
-  if (!el) return;
-  el.textContent = msg;
-  el.className = `toast ${type} show`;
-  setTimeout(() => el.classList.remove('show'), 2800);
+// ── balance history from real game results ──────────────────────────────────
+// Walk back from the current balance through each result's net.
+function balanceSeries() {
+  const pts = [Number(store.ccBalance)];
+  let b = Number(store.ccBalance);
+  for (const r of history) { b -= Number(r.net) || 0; pts.unshift(Math.max(0, b)); }
+  return pts.length > 1 ? pts : [b, b];
+}
+function renderDelta() {
+  const today = new Date().toDateString();
+  const net = history.filter((r) => new Date(r.created_at).toDateString() === today).reduce((s, r) => s + (Number(r.net) || 0), 0);
+  const el = $('delta'); if (!el) return;
+  el.className = `delta${net < 0 ? ' neg' : net === 0 ? ' flat' : ''}`;
+  el.textContent = net === 0 ? 'No games today' : `${net > 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(net))} CC today`;
+}
+function drawSpark() {
+  const cv = $('spark'); if (!cv) return;
+  const r = cv.getBoundingClientRect(); if (!r.width) return;
+  const d = Math.min(devicePixelRatio || 1, 2); cv.width = r.width * d; cv.height = r.height * d;
+  const c = cv.getContext('2d'); c.setTransform(d, 0, 0, d, 0, 0);
+  const P = balanceSeries(), W = r.width, H = r.height, lo = Math.min(...P), hi = Math.max(...P);
+  const col = isBroke() ? '239,68,68' : '16,185,129';
+  const x = (i) => i / (P.length - 1) * W, y = (v) => H - 6 - ((v - lo) / ((hi - lo) || 1)) * (H - 20);
+  const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, `rgba(${col},.22)`); g.addColorStop(1, `rgba(${col},0)`);
+  c.beginPath(); c.moveTo(0, H); P.forEach((v, i) => c.lineTo(x(i), y(v))); c.lineTo(W, H); c.closePath(); c.fillStyle = g; c.fill();
+  c.beginPath(); P.forEach((v, i) => (i ? c.lineTo(x(i), y(v)) : c.moveTo(x(i), y(v))));
+  c.strokeStyle = `rgba(${col},.85)`; c.lineWidth = 2; c.lineJoin = 'round'; c.stroke();
 }
 
-function bindEvents(app) {
-  // Claim button
-  app.addEventListener('click', async (e) => {
-    if (e.target.id !== 'claimBtn') return;
-    const btn = e.target;
-    btn.disabled = true; btn.textContent = 'Claiming…';
-    try {
-      const data = await api.post('/daily/claim');
-      claimedNow = true;
+// ── daily reward ────────────────────────────────────────────────────────────
+function renderDaily() {
+  const el = $('daily'); if (!el) return;
+  if (!daily) { el.style.display = 'none'; return; }
+  const claimed = !daily.can_claim;
+  const today = claimed ? daily.current_streak : daily.next_day;
+  const reward = claimed ? rewardFor(today + 1) : daily.reward;
+  el.style.display = isBroke() && claimed ? 'none' : '';
+  const sub = claimed
+    ? `Day ${today} claimed. Miss tomorrow and it resets to day 1.`
+    : (isBroke() ? 'This is all you have left.' : `Day ${today} of your streak`);
+  el.innerHTML = `<div class="d-top"><div><div class="d-t">Daily reward</div><div class="d-s">${sub}</div></div>
+      <div class="d-amt">+${fmt(reward)} <small>CC</small></div></div>
+    <div class="track">${REWARDS.map((r, i) => {
+      const day = i + 1;
+      const cls = day < today || (claimed && day === today) ? 'done' : (day === today && !claimed ? 'today' : '');
+      return `<div class="pip ${cls}"><i></i><span>${r >= 1000 ? '1k' : r}</span></div>`;
+    }).join('')}</div>
+    <button class="claim" id="claim" ${claimed ? 'disabled' : ''}>${claimed ? 'Next reward in <span class="cd" id="cd"></span>' : `Claim ${fmt(daily.reward)} CC`}</button>`;
+  clearInterval(cdTimer);
+  if (claimed) {
+    const tick = () => {
+      const n = new Date(), m = new Date(n); m.setHours(24, 0, 0, 0);
+      let s = Math.max(0, (m - n) / 1000 | 0); const hh = s / 3600 | 0; s %= 3600; const mm = s / 60 | 0; s %= 60;
+      const c = $('cd'); if (c) c.textContent = `${hh}h ${String(mm).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+    };
+    tick(); cdTimer = setInterval(tick, 1000);
+  } else $('claim').addEventListener('click', claim);
+}
+async function claim() {
+  const btn = $('claim'); btn.disabled = true; btn.textContent = 'Claiming…';
+  try {
+    const data = await api.post('/daily/claim');
+    const b = btn.getBoundingClientRect(), o = $('odo').getBoundingClientRect();
+    const f = document.createElement('div'); f.className = 'fly'; f.textContent = `+${fmt(data.reward)}`;
+    f.style.left = `${b.left + b.width / 2 - 30}px`; f.style.top = `${b.top}px`; document.body.appendChild(f);
+    f.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 },
+      { transform: `translate(${o.left + o.width / 2 - b.left - b.width / 2}px,${o.top - b.top + 10}px) scale(1.4)`, opacity: 0.2 }],
+    { duration: 750, easing: 'cubic-bezier(.5,0,.3,1)' }).onfinish = () => {
+      f.remove();
       updateBalance({ cc_balance: data.cc_balance, a_balance: data.a_balance });
-      dailyState = { ...dailyState, can_claim: false, current_streak: data.new_streak };
-      document.getElementById('balNum').textContent = Number(data.cc_balance).toLocaleString();
-      document.getElementById('dailyTitle').textContent = `Day ${data.new_streak} — Claimed`;
-      document.getElementById('dailySub').textContent = `Come back tomorrow for ${rewardForDay(data.new_streak + 1).toLocaleString()} CC`;
-      document.getElementById('dailyCard').classList.add('dim');
-      btn.textContent = 'Claimed';
-      showToast(`+${data.reward.toLocaleString()} CC claimed! 🎉`, 'green');
-    } catch (err) {
-      showToast(err.message || 'Failed to claim', 'red');
-      btn.disabled = false; btn.textContent = 'Claim';
-    }
-  });
+      daily = { ...daily, can_claim: false, current_streak: data.new_streak };
+      emitBalance(); renderDaily();
+      toast(`Day ${data.new_streak} claimed · +${fmt(data.reward)} CC`, 'em');
+    };
+  } catch (err) {
+    toast(err.message || 'Failed to claim', 'red');
+    btn.disabled = false; btn.textContent = `Claim ${fmt(daily.reward)} CC`;
+  }
+}
 
-  // Games nav
-  document.getElementById('nav-games')?.addEventListener('click', () => {
-    window.__navigate('games');
-  });
+// ── streaks, quick play, recent ─────────────────────────────────────────────
+const FLAVOR = ['The dealer is starting to sweat.', 'Nobody tell them the odds.', 'Riding it while it lasts.'];
+function renderSide() {
+  const streaks = (profile?.win_streaks || []).slice(0, 2);
+  $('streakwrap').innerHTML = streaks.length
+    ? `<div class="sec first">Running hot</div><div class="sgrid">${streaks.map((s, i) =>
+      `<div class="stk"><div class="flames">🔥</div><div class="sg">${esc(gameName(s.game))}</div><div class="sn">${s.current_streak}<small>wins</small></div><div class="sf">${FLAVOR[i]}</div></div>`).join('')}</div>`
+    : '';
 
-  // Shop / Profile nav
-  document.getElementById('nav-shop')?.addEventListener('click', () => {
-    window.__navigate('shop');
-  });
-  document.getElementById('nav-social')?.addEventListener('click', () => {
-    window.__navigate('social');
-  });
-  document.getElementById('nav-profile')?.addEventListener('click', () => {
-    window.__navigate('profile');
-  });
+  // most-played games from history, padded with defaults
+  const counts = {};
+  history.forEach((r) => { counts[r.game] = (counts[r.game] || 0) + 1; });
+  const ids = Object.keys(counts).sort((a, b) => counts[b] - counts[a]).filter((id) => GAME_BY_ID[id]);
+  ['crash', 'blackjack', 'mines', 'slots', 'plinko'].forEach((id) => { if (!ids.includes(id)) ids.push(id); });
+  $('qp').innerHTML = ids.slice(0, 4).map((id) => {
+    const g = GAME_BY_ID[id], last = history.find((r) => r.game === id);
+    const sub = last ? `${Number(last.net) >= 0 ? '+' : '−'}${fmt(Math.abs(Number(last.net)))}` : 'play';
+    return `<button class="q" data-route="${g.route}"><b>${g.icon}</b><span>${g.name}</span><small>${sub}</small></button>`;
+  }).join('');
+  $('qp').querySelectorAll('[data-route]').forEach((b) => b.addEventListener('click', () => window.__navigate(b.dataset.route)));
 
-  // Live balance
-  document.addEventListener('balance:updated', ({ detail }) => {
-    const el = document.getElementById('balNum');
-    if (el) el.textContent = Number(detail.cc_balance).toLocaleString();
-  });
+  const wins = history.filter((r) => Number(r.net) > 0).length;
+  const st = profile?.stats;
+  $('today').innerHTML = `
+    <div class="stk"><div class="sg">Last ${history.length} games</div><div class="sn" style="color:#fff">${wins}<small>won</small></div><div class="sf">${history.length - wins} lost${st ? ` · ${st.win_rate}% all time` : ''}</div></div>
+    <div class="stk" data-go="social" style="cursor:pointer"><div class="sg">Leaderboard</div><div class="sn" style="color:#fff">${rank ? '#' + fmt(rank.rank) : '—'}</div><div class="sf">${rank?.weekly_badge ? '👑 Richest MF this week' : 'Tap to see the board'}</div></div>`;
+  document.querySelector('[data-go="social"]')?.addEventListener('click', () => window.__navigate('social'));
+}
+
+function tickerHTML(list) {
+  return list.map((e) => `<span class="ti"><b>${esc(e.username)}</b>${e.amount != null
+    ? (e.win ? ` won <b class="w">+${fmt(Math.abs(e.amount))}</b>` : ` lost <b class="l">−${fmt(Math.abs(e.amount))}</b>`)
+    : (e.win ? ' made the Hall of Fame' : ' made the Hall of Shame')}${e.game ? ` <span class="gm">on ${esc(gameName(e.game))}</span>` : ''}</span>`).join('');
 }

@@ -75,7 +75,12 @@ function registerBlackjackHandlers(io, socket) {
     const userId = socket.user.userId;
     bet = Math.floor(Number(bet));
     if (!Number.isFinite(bet) || bet < 10) return socket.emit('blackjack:error', { message: 'Minimum bet is 10 CC' });
-    if (activeGames.has(userId)) return socket.emit('blackjack:error', { message: 'Game already in progress' });
+    if (activeGames.has(userId)) {
+      // Unfinished hand from before a page leave — resume it.
+      const g = activeGames.get(userId);
+      socket.emit('blackjack:resume', { bet: g.bet, split_count: g.splitCount });
+      return emitState(socket, g);
+    }
 
     try {
       // Deduct bet

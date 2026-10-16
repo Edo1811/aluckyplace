@@ -1,88 +1,93 @@
 import socket from '../socket.js';
-import { store, updateBalance } from '../store.js';
+import { $, later } from '../ui/core.js';
+import { fitCanvas, loop, flick, on, eOut } from '../games/shell.js';
+import { pvpShell } from '../games/pvp.js';
+import { w, gd, cl, GOLD } from '../games/draw.js';
 
-export function renderCoinflip(app, matchData) {
-  const { matchId, your_role, pot } = matchData;
+// Server assigns sides; the flip comes in pvp:round_result ~4.5s after start.
+// The player tosses the coin with a flick — the coin lands on the server's flip.
+export function renderCoinflip(app, md) {
+  const p = pvpShell(app, md, {
+    game: 'coinflip', title: 'Coinflip',
+    stage: `<div class="pad">
+      <div style="flex:1;position:relative;min-height:170px"><canvas class="fill" id="cvF"></canvas></div>
+      <div class="cfrow"><div class="cfp"><div class="n">You</div><div class="b" id="cfMe">—</div></div>
+        <div class="cfp"><div class="s" id="cfMsg">Your toss</div></div>
+        <div class="cfp"><div class="n" id="cfOppN"></div><div class="b" id="cfOpp">—</div></div></div>
+      <div class="ghint" id="cfHint">Flick the coin upwards to toss it</div>
+    </div>`,
+  });
+  if (!p) return;
+  const side = (r) => (r === 'heads' ? 'Heads' : 'Tails');
+  const mine = md.your_role || 'heads';
+  $('cfMe').textContent = side(mine); $('cfOpp').textContent = side(mine === 'heads' ? 'tails' : 'heads');
+  $('cfOppN').textContent = md.opponent || 'Opponent';
 
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .cp{display:flex;flex-direction:column;height:100vh;background:radial-gradient(ellipse at 50% 40%,#1a130a 0%,#050505 70%);font-family:'Playfair Display',Georgia,serif;color:#fff;align-items:center;justify-content:center;gap:24px;text-align:center;padding:28px}
-      .game-lbl{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-      .pot-display{font-size:14px;color:rgba(255,255,255,.4)}
-      .pot-display span{color:#D4AF37;font-weight:700}
-      .role-badge{padding:8px 22px;border-radius:20px;font-size:16px;font-weight:700;border:1px solid}
-      .role-badge.heads{background:rgba(212,175,55,.15);border-color:rgba(212,175,55,.35);color:#D4AF37}
-      .role-badge.tails{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2);color:rgba(255,255,255,.7)}
-      .coin-wrap{position:relative;width:140px;height:140px}
-      .coin{width:140px;height:140px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:64px;border:3px solid #D4AF37;background:rgba(212,175,55,.12);transition:all .5s}
-      .coin.spinning{animation:flip 0.8s linear infinite}
-      @keyframes flip{0%{transform:rotateY(0deg)}100%{transform:rotateY(360deg)}}
-      .coin.result-heads{background:rgba(212,175,55,.2);border-color:#D4AF37}
-      .coin.result-tails{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.3)}
-      .status{font-size:18px;color:rgba(255,255,255,.6);font-style:italic;min-height:28px}
-      .result-big{font-size:42px;font-weight:700;min-height:52px}
-      .result-big.win{color:#10b981}
-      .result-big.loss{color:#ef4444}
-      .amount{font-size:22px;font-weight:700;min-height:30px}
-      .nav-btn{padding:12px 36px;background:#10b981;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer;display:none}
-    </style>
-    <div class="cp">
-      <div class="game-lbl">Coinflip · PvP</div>
-      <div class="pot-display">Pot: <span>${pot.toLocaleString()} CC</span></div>
-      <div class="role-badge ${your_role}" id="roleBadge">You are ${your_role.toUpperCase()}</div>
-      <div class="coin spinning" id="coin">🪙</div>
-      <div class="status" id="status">Flipping…</div>
-      <div class="result-big" id="resultBig"></div>
-      <div class="amount" id="amount"></div>
-      <button class="nav-btn" id="navBtn" onclick="window.__navigate('games')">Back to Games</button>
-    </div>
-  `;
+  let flip = null, tossed = false, t = 0, dur = 2.4, power = 1, landed = false, result = null, auto = 0;
 
-  socket.on('pvp:round_result', ({ flip, your_role: role, cc_balance }) => {
-    const coin   = document.getElementById('coin');
-    const status = document.getElementById('status');
-    const result = document.getElementById('resultBig');
-    const amt    = document.getElementById('amount');
-    const btn    = document.getElementById('navBtn');
+  function toss(pw) {
+    if (tossed) return;
+    tossed = true; power = pw; t = 0; dur = 1.5 + power * 1.3;
+    $('cfHint').textContent = 'In the air';
+  }
+  function land() {
+    landed = true;
+    const won = flip === mine;
+    $('cfMsg').textContent = won ? 'You win' : 'You lose';
+    $('cfHint').textContent = side(flip);
+    if (result) later(900, () => p.finish({ won: result.you_won, seed: result.seed, sub: `${side(flip)} · ${result.you_won ? 'pot is yours' : `${md.opponent} takes the pot`}` }));
+  }
 
-    coin.classList.remove('spinning');
-    coin.textContent = flip === 'heads' ? '👑' : '🔘';
-    coin.className   = `coin result-${flip}`;
-
-    status.textContent = `The coin landed on ${flip.toUpperCase()}`;
-
-    const won = role === flip;
-    result.textContent = won ? 'You Win!' : 'You Lose';
-    result.className   = `result-big ${won ? 'win' : 'loss'}`;
-
-    if (won) {
-      amt.textContent = `+${pot.toLocaleString()} CC`;
-      amt.style.color = '#10b981';
-    } else {
-      amt.style.color = '#ef4444';
-    }
-
-    if (cc_balance !== undefined) {
-      updateBalance({ cc_balance });
-    }
-
-    btn.style.display = 'block';
-    socket.off('pvp:round_result');
-    socket.off('pvp:auto_win');
+  flick($('cvF'), (g) => {
+    if (tossed) return;
+    if (g.dy > -40 || g.speed < 180) { $('cfHint').textContent = 'Flick it upwards — harder'; return; }
+    toss(cl(g.speed / 900, 0.45, 1.7));
   });
 
-  socket.on('pvp:auto_win', ({ pot: p }) => {
-    document.getElementById('coin').classList.remove('spinning');
-    document.getElementById('status').textContent = 'Opponent disconnected';
-    document.getElementById('resultBig').textContent = 'You Win!';
-    document.getElementById('resultBig').className = 'result-big win';
-    document.getElementById('amount').textContent = `+${(p||pot).toLocaleString()} CC`;
-    document.getElementById('amount').style.color = '#10b981';
-    document.getElementById('navBtn').style.display = 'block';
-    socket.off('pvp:round_result');
-    socket.off('pvp:auto_win');
+  on(socket, {
+    'pvp:round_result': ({ flip: f }) => {
+      flip = f;
+      // nobody likes waiting on a shy flicker
+      auto = later(3500, () => { if (!tossed) { $('cfHint').textContent = 'Tossed for you'; toss(1); } });
+    },
+    'pvp:result': (r) => {
+      result = r;
+      if (landed) later(900, () => p.finish({ won: r.you_won, seed: r.seed, sub: `${side(flip)} · ${r.you_won ? 'pot is yours' : `${md.opponent} takes the pot`}` }));
+    },
+  });
+  void auto;
+
+  const cv = $('cvF');
+  loop((dt) => {
+    const f = fitCanvas(cv); if (!f) return;
+    const { ctx: c, W, H } = f;
+    const R = Math.min(H * 0.34, W * 0.22, 130);
+    let a = 0, k = 0;
+    if (tossed) {
+      t += dt;
+      // keep spinning until the server's flip is known, then settle on it
+      if (!flip && t > dur * 0.6) t = dur * 0.6;
+      k = cl(t / dur, 0, 1);
+      const turns = 4 + Math.round(power * 5) + (flip === 'tails' ? 0.5 : 0);
+      a = eOut(k) * Math.PI * 2 * turns;
+      if (k >= 1 && !landed && flip) land();
+    }
+    const sx = Math.cos(a), face = sx >= 0 ? 'H' : 'T';
+    const lift = Math.sin(k * Math.PI) * H * (0.16 + power * 0.08);
+    c.save(); c.translate(W / 2, H * 0.5 - lift);
+    c.beginPath(); c.ellipse(0, R * 1.45 + lift, R * 0.6, R * 0.13, 0, 0, 7); c.fillStyle = 'rgba(0,0,0,.35)'; c.fill();
+    c.scale(Math.max(Math.abs(sx), 0.05), 1);
+    c.beginPath(); c.arc(0, 0, R, 0, 7); c.fillStyle = face === 'H' ? '#c9a227' : '#161616'; c.fill();
+    c.lineWidth = 2.5; c.strokeStyle = face === 'H' ? gd(0.9) : w(0.16); c.stroke();
+    c.beginPath(); c.arc(0, 0, R * 0.78, 0, 7); c.lineWidth = 1; c.strokeStyle = face === 'H' ? 'rgba(255,235,170,.45)' : gd(0.3); c.stroke();
+    c.font = `700 ${R * 0.85}px "Playfair Display",Georgia,serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = face === 'H' ? '#2a1f00' : GOLD; c.fillText(face, 0, R * 0.04);
+    c.restore();
+    if (!tossed) {
+      const pa = 0.2 + 0.12 * Math.sin(performance.now() / 400), y = H * 0.5 - R * 1.25;
+      c.strokeStyle = `rgba(16,185,129,${pa})`; c.lineWidth = 1.4;
+      c.beginPath(); c.moveTo(W / 2, y); c.lineTo(W / 2, y - 14); c.stroke();
+      c.beginPath(); c.moveTo(W / 2 - 6, y - 8); c.lineTo(W / 2, y - 16); c.lineTo(W / 2 + 6, y - 8); c.stroke();
+    }
   });
 }

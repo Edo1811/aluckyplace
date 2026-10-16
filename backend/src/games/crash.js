@@ -38,6 +38,7 @@ function startBettingPhase() {
     roundId: require('crypto').randomUUID(),
     seed, hash, crashPoint,
     startedAt: null,
+    bettingEndsAt: Date.now() + 6000,
     bets: {},
     chat: [],
   };
@@ -124,14 +125,23 @@ function registerCrashHandlers(io, socket) {
 
   socket.join('crash');
 
-  // Send current state to new joiner
-  socket.emit('crash:state', {
-    phase:      gameState.phase,
-    round_id:   gameState.roundId,
-    hash:       gameState.hash,
-    started_at: gameState.startedAt,
-    multiplier: gameState.phase === 'active' ? parseFloat(currentMultiplier().toFixed(2)) : 1,
-  });
+  // Send current state to new joiner — and again whenever the crash page asks
+  // (the page can be opened long after the socket connected).
+  const sendState = () => {
+    const mine = socket.user ? gameState.bets[socket.user.userId] : null;
+    socket.emit('crash:state', {
+      phase:      gameState.phase,
+      round_id:   gameState.roundId,
+      hash:       gameState.hash,
+      started_at: gameState.startedAt,
+      multiplier: gameState.phase === 'active' ? parseFloat(currentMultiplier().toFixed(2)) : 1,
+      betting_ms_left: gameState.phase === 'betting' ? Math.max(0, (gameState.bettingEndsAt || 0) - Date.now()) : 0,
+      my_bet:     mine ? mine.amount : 0,
+      cashed_out: mine && mine.cashedOut ? parseFloat(mine.cashoutMultiplier.toFixed(2)) : 0,
+    });
+  };
+  sendState();
+  socket.on('crash:sync', sendState);
 
   socket.on('crash:bet', async ({ round_id, amount }) => {
     if (!socket.user) return;

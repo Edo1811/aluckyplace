@@ -1,5 +1,7 @@
+import './ui/kit.css';
 import './socket.js';
 import { setUser } from './store.js';
+import { runLeave } from './ui/core.js';
 import { renderLanding }    from './pages/landing.js';
 import { renderHome }       from './pages/home.js';
 import { renderGames }      from './pages/games.js';
@@ -46,7 +48,13 @@ if (token && userRaw) {
 let pendingMatchData = null;
 
 export function navigate(page, data) {
-  if (data) pendingMatchData = data;
+  if (data && (page.startsWith('pvp-') || page.startsWith('matchmaking-'))) pendingMatchData = data;
+
+  // Tear down the previous page (socket listeners, timers, sheets) and reset the shell.
+  runLeave();
+  app.className = 'app';
+  app.removeAttribute('style');
+  window.scrollTo(0, 0);
 
   // Matchmaking routes — format: 'matchmaking-coinflip'
   if (page.startsWith('matchmaking-')) {
@@ -84,7 +92,7 @@ export function navigate(page, data) {
     case 'game-roulette':  return renderRoulette(app);
     case 'game-plinko':    return renderPlinko(app);
     case 'shop':           return renderShop(app, data);
-    case 'profile':        return renderProfile(app);
+    case 'profile':        return renderProfile(app, data);
     case 'social':         return renderSocial(app);
     case 'guild':          return renderGuild(app, data);
     default:               return renderHome(app);

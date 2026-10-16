@@ -1,106 +1,80 @@
 import socket from '../socket.js';
-import { store, updateBalance } from '../store.js';
+import { $, later } from '../ui/core.js';
+import { on } from '../games/shell.js';
+import { pvpShell } from '../games/pvp.js';
 
-export function renderHigherLow(app, matchData) {
-  const { matchId, pot } = matchData;
+// Both players get a hidden number 1–100; higher wins. The server resolves ~3s after start
+// (ties redraw). The player swipes their own card up to turn it, then the opponent's turns.
+const STYLE = `
+.hlrow{display:flex;justify-content:center;gap:28px;align-items:flex-end}
+.hlcol{display:flex;flex-direction:column;align-items:center;gap:10px}
+.hlcard{width:92px;height:132px;border-radius:12px;position:relative;transform-style:preserve-3d;transition:transform .55s cubic-bezier(.2,1,.3,1);touch-action:none;cursor:grab}
+.hlcard .f,.hlcard .b{position:absolute;inset:0;border-radius:12px;backface-visibility:hidden;display:flex;align-items:center;justify-content:center}
+.hlcard .b{background:#0e1a16;border:1px solid rgba(16,185,129,.4);background-image:repeating-linear-gradient(135deg,rgba(16,185,129,.14) 0 6px,transparent 6px 12px)}
+.hlcard .f{background:#faf8f2;color:#141414;font-size:44px;font-weight:700;transform:rotateY(180deg);box-shadow:0 10px 26px rgba(0,0,0,.5)}
+.hlcard.up{transform:rotateY(180deg)}
+.hlcard.win .f{box-shadow:0 0 0 3px var(--em),0 10px 26px rgba(0,0,0,.5)}
+.hlcard.lose .f{opacity:.55}
+@media(min-width:900px){.hlcard{width:120px;height:172px}.hlcard .f{font-size:56px}}
+`;
 
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .hlp{display:flex;flex-direction:column;height:100vh;background:radial-gradient(ellipse at 50% 40%,#080d1a 0%,#050505 70%);font-family:'Playfair Display',Georgia,serif;color:#fff;align-items:center;justify-content:center;gap:24px;text-align:center;padding:28px}
-      .game-lbl{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-      .pot-display{font-size:14px;color:rgba(255,255,255,.4)}
-      .pot-display span{color:#D4AF37;font-weight:700}
-      .cards-row{display:flex;gap:24px;align-items:center}
-      .card-wrap{display:flex;flex-direction:column;align-items:center;gap:10px}
-      .card-lbl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-      .card-face{width:100px;height:140px;border-radius:12px;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:48px;font-weight:700;transition:all .5s;cursor:default}
-      .card-face.facedown{background:linear-gradient(135deg,#1a2a5e,#0d1a3a)}
-      .card-face.revealed{background:rgba(255,255,255,.95);color:#111;animation:flip .4s ease-out}
-      .card-face.winner{border-color:#D4AF37;box-shadow:0 0 24px rgba(212,175,55,.4)}
-      .card-face.loser{border-color:#ef4444;opacity:.6}
-      @keyframes flip{0%{transform:rotateY(90deg)}100%{transform:rotateY(0deg)}}
-      .vs-sep{font-size:20px;color:rgba(255,255,255,.2);font-weight:700}
-      .status{font-size:18px;color:rgba(255,255,255,.5);font-style:italic;min-height:28px}
-      .result-big{font-size:36px;font-weight:700;min-height:44px}
-      .result-big.win{color:#10b981}
-      .result-big.loss{color:#ef4444}
-      .nav-btn{padding:12px 36px;background:#10b981;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer;display:none}
-    </style>
-    <div class="hlp">
-      <div class="game-lbl">Higher or Lower · PvP</div>
-      <div class="pot-display">Pot: <span>${pot.toLocaleString()} CC</span></div>
-      <div class="cards-row">
-        <div class="card-wrap">
-          <div class="card-lbl">You</div>
-          <div class="card-face facedown" id="myCard">🂠</div>
-        </div>
-        <div class="vs-sep">VS</div>
-        <div class="card-wrap">
-          <div class="card-lbl">Opponent</div>
-          <div class="card-face facedown" id="oppCard">🂠</div>
-        </div>
+export function renderHigherLow(app, md) {
+  const p = pvpShell(app, md, {
+    game: 'highlow', title: 'Higher or Lower', css: STYLE,
+    stage: `<div class="pad">
+      <div class="hlrow">
+        <div class="hlcol"><div class="hlcard" id="hlMe"><div class="b"></div><div class="f" id="hlMeN"></div></div><div class="handlab">You</div></div>
+        <div class="hlcol"><div class="hlcard" id="hlOpp"><div class="b"></div><div class="f" id="hlOppN"></div></div><div class="handlab" id="hlOppL"></div></div>
       </div>
-      <div class="status" id="status">Cards are being drawn…</div>
-      <div class="result-big" id="resultBig"></div>
-      <button class="nav-btn" id="navBtn" onclick="window.__navigate('games')">Back to Games</button>
-    </div>
-  `;
-
-  // Brief suspense then reveal
-  setTimeout(() => {
-    document.getElementById('status').textContent = 'Revealing in 3…';
-    let t = 3;
-    const iv = setInterval(() => {
-      t--;
-      const el = document.getElementById('status');
-      if (el) el.textContent = t > 0 ? `Revealing in ${t}…` : 'Revealing!';
-      if (t <= 0) clearInterval(iv);
-    }, 1000);
-  }, 500);
-
-  socket.on('pvp:round_result', ({ your_number, opp_number, tie }) => {
-    if (tie) {
-      document.getElementById('status').textContent = 'Tie! Redrawing…';
-      document.getElementById('myCard').className  = 'card-face facedown';
-      document.getElementById('myCard').textContent  = '🂠';
-      document.getElementById('oppCard').className = 'card-face facedown';
-      document.getElementById('oppCard').textContent = '🂠';
-      return;
-    }
-
-    const myCard  = document.getElementById('myCard');
-    const oppCard = document.getElementById('oppCard');
-
-    myCard.textContent  = your_number;
-    oppCard.textContent = opp_number;
-    myCard.className    = 'card-face revealed';
-    oppCard.className   = 'card-face revealed';
-
-    setTimeout(() => {
-      const won = your_number > opp_number;
-      myCard.classList.add(won ? 'winner' : 'loser');
-      oppCard.classList.add(won ? 'loser' : 'winner');
-
-      document.getElementById('status').textContent = '';
-      const rb = document.getElementById('resultBig');
-      rb.textContent = won ? '🏆 You Win!' : 'You Lose';
-      rb.className   = `result-big ${won ? 'win' : 'loss'}`;
-      document.getElementById('navBtn').style.display = 'block';
-
-      socket.off('pvp:round_result');
-      socket.off('pvp:auto_win');
-    }, 600);
+      <div class="logline" id="hlLog">Higher number takes the pot</div>
+      <div class="ghint" id="hlHint">Swipe your card up to turn it</div>
+    </div>`,
   });
+  if (!p) return;
+  $('hlOppL').textContent = md.opponent || 'Opponent';
 
-  socket.on('pvp:auto_win', ({ pot: p }) => {
-    document.getElementById('status').textContent    = 'Opponent disconnected.';
-    document.getElementById('resultBig').textContent = '🏆 You Win!';
-    document.getElementById('resultBig').className   = 'result-big win';
-    document.getElementById('navBtn').style.display  = 'block';
-    socket.off('pvp:round_result');
-    socket.off('pvp:auto_win');
+  let nums = null, swiped = false, shown = false, result = null, autoT = 0;
+  const card = $('hlMe');
+
+  function reveal() {
+    if (shown || !nums || !swiped) return;
+    shown = true;
+    $('hlMeN').textContent = nums.your_number; card.classList.add('up');
+    $('hlHint').textContent = '';
+    later(900, () => {
+      $('hlOppN').textContent = nums.opp_number; $('hlOpp').classList.add('up');
+      const won = nums.your_number > nums.opp_number;
+      later(600, () => {
+        card.classList.add(won ? 'win' : 'lose'); $('hlOpp').classList.add(won ? 'lose' : 'win');
+        $('hlLog').textContent = `${nums.your_number} vs ${nums.opp_number}`;
+        $('hlLog').style.color = won ? 'var(--em)' : '#f87171';
+        if (result) done();
+      });
+    });
+  }
+  const done = () => later(1000, () => p.finish({ won: result.you_won, seed: result.seed, sub: `${nums.your_number} vs ${nums.opp_number}` }));
+
+  // swipe gesture
+  let down = false, y0 = 0, dy = 0;
+  card.addEventListener('pointerdown', (e) => { if (swiped) return; down = true; y0 = e.clientY; dy = 0; card.style.transition = 'none'; try { card.setPointerCapture(e.pointerId); } catch { /* */ } });
+  card.addEventListener('pointermove', (e) => { if (!down) return; dy = Math.min(0, e.clientY - y0); card.style.transform = `translateY(${dy * 0.6}px) rotate(${dy * -0.03}deg)`; });
+  const up = () => {
+    if (!down) return; down = false;
+    card.style.transition = ''; card.style.transform = '';
+    if (dy < -50) { swiped = true; clearTimeout(autoT); $('hlHint').textContent = nums ? '' : 'Waiting for the deal…'; reveal(); }
+  };
+  card.addEventListener('pointerup', up); card.addEventListener('pointercancel', up);
+
+  on(socket, {
+    'pvp:round_result': (r) => {
+      if (r.tie) {
+        $('hlLog').textContent = 'Same number — redrawing'; nums = null;
+        return;
+      }
+      nums = r;
+      if (swiped) reveal();
+      else autoT = later(4000, () => { if (!swiped) { swiped = true; $('hlHint').textContent = 'Turned for you'; reveal(); } });
+    },
+    'pvp:result': (r) => { result = r; if (shown && card.classList.contains('win') !== card.classList.contains('lose')) done(); },
   });
 }

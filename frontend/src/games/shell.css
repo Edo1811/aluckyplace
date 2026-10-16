@@ -1,0 +1,197 @@
+/* Game layer: shell, bet screen, results, and per-game pieces shared across game pages. */
+/* ===================== game layer ===================== */
+.glayer{flex:1;min-height:0;display:flex;flex-direction:column;width:100%;max-width:1120px;margin:0 auto}
+.gtop{display:flex;align-items:center;gap:12px;padding:calc(12px + env(safe-area-inset-top)) 14px 12px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
+.gexit{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);font-size:15px;cursor:pointer;font-family:var(--pf);flex-shrink:0}
+.gtitle{flex:1;font-size:15.5px;font-weight:700;letter-spacing:.01em}
+.gbal{font-size:13px;color:var(--em);font-weight:700;letter-spacing:.02em}
+.gbal small{color:rgba(255,255,255,.25);font-size:10px;letter-spacing:.1em;margin-left:3px}
+.gscreen{display:none;flex:1;min-height:0;flex-direction:column}
+.gscreen.on{display:flex}
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:22px;text-align:center;min-height:0}
+.ga{padding:14px 20px;border-radius:12px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:rgba(255,255,255,.75);font-family:var(--pf);font-size:14px;font-weight:700;cursor:pointer;transition:background .15s,opacity .15s;flex:1}
+.ga:hover{background:rgba(255,255,255,.11)}
+.ga:disabled{opacity:.32;cursor:default}
+.ga-em{background:var(--em);border-color:transparent;color:#03150e}
+.ga-em:hover{background:var(--em);filter:brightness(1.08)}
+.ga-red{background:rgba(239,68,68,.16);border-color:rgba(239,68,68,.3);color:#ffb4b4}
+.ga-gold{background:rgba(212,175,55,.15);border-color:rgba(212,175,55,.32);color:var(--gold)}
+.gactions{display:flex;gap:8px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));border-top:1px solid rgba(255,255,255,.06);flex-shrink:0}
+.gstage{flex:1;position:relative;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+.fill{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+/* bet screen */
+.betbox{width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px}
+.bt-lbl{font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,.28)}
+.bt-inp{width:100%;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:18px;color:#fff;font-family:var(--pf);font-size:30px;font-weight:700;text-align:center;outline:none}
+.bt-inp:focus{border-color:rgba(16,185,129,.5)}
+.chips{display:flex;gap:7px}
+.chip{flex:1;padding:10px 0;border-radius:10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.55);font-family:var(--pf);font-size:12px;font-weight:700;cursor:pointer}
+.chip:hover{background:rgba(255,255,255,.1)}
+.muted{font-size:11.5px;color:rgba(255,255,255,.28)}
+
+/* queue + found */
+.qring{width:74px;height:74px;border-radius:50%;border:2px solid rgba(255,255,255,.07);border-top-color:var(--em);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.qtitle{font-size:24px;font-weight:700}
+.qstats{display:flex;gap:22px;margin-top:4px}
+.qs-v{font-size:14px;font-weight:700;color:var(--em)}
+.foundring{width:92px;height:92px;border-radius:50%;border:2px solid var(--em);display:flex;align-items:center;justify-content:center;font-size:26px;animation:pop .5s cubic-bezier(.2,1.4,.4,1)}
+@keyframes pop{0%{transform:scale(.5);opacity:0}100%{transform:scale(1);opacity:1}}
+.cdring{font-size:64px;font-weight:700;color:var(--em);animation:pop .4s ease-out}
+
+/* pvp betting */
+.prow{display:flex;gap:9px;width:100%;max-width:420px}
+.pcard{flex:1;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:13px;text-align:left}
+.pcard.you{border-color:rgba(16,185,129,.28)}
+.pc-name{font-size:13.5px;font-weight:700;margin-bottom:2px}
+.pc-bal{font-size:10.5px;color:rgba(255,255,255,.3)}
+.pc-bet{font-size:19px;font-weight:700;color:var(--em);margin-top:8px}
+.pc-st{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.28);margin-top:6px}
+.pc-st.ok{color:var(--em)}
+
+/* result */
+.res-badge{font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:rgba(255,255,255,.35)}
+.res-amt{font-size:52px;font-weight:700;line-height:1}
+.res-amt.win{color:var(--em)}
+.res-amt.lose{color:var(--red)}
+.res-sub{font-size:13px;color:rgba(255,255,255,.36);font-style:italic}
+
+/* shared in-game bits */
+.bigmul{position:absolute;top:0;left:0;right:0;text-align:center;padding-top:8%;font-size:56px;font-weight:700;pointer-events:none}
+.hint{position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:rgba(255,255,255,.22);pointer-events:none}
+.tag{position:absolute;top:12px;left:14px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.26)}
+.flash{position:absolute;inset:0;pointer-events:none;opacity:0}
+.pad{padding:14px;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;justify-content:center}
+
+/* playing cards (blackjack / high-low) */
+.cardrow{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;min-height:96px;align-items:center}
+.pc2{width:60px;height:86px;border-radius:8px;background:#faf8f2;color:#141414;display:flex;flex-direction:column;justify-content:space-between;padding:6px 7px;font-family:Georgia,serif;font-weight:700;font-size:15px;box-shadow:0 6px 18px rgba(0,0,0,.5);animation:dealin .32s cubic-bezier(.2,1,.3,1)}
+.pc2.red{color:#b02020}
+.pc2 .mid{align-self:center;font-size:26px;font-weight:400}
+.pc2 .bot{align-self:flex-end;transform:rotate(180deg)}
+.pc2.back{background:#0e1a16;border:1px solid rgba(16,185,129,.4);background-image:repeating-linear-gradient(135deg,rgba(16,185,129,.14) 0 6px,transparent 6px 12px)}
+@keyframes dealin{from{transform:translateY(-22px) rotate(-6deg);opacity:0}}
+.handlab{font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.28);text-align:center}
+.handlab b{color:#fff;font-size:13px;letter-spacing:0;margin-left:6px}
+
+/* mines */
+.mgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;width:100%;max-width:330px;margin:0 auto}
+.mtile{aspect-ratio:1;border-radius:11px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;transition:transform .12s,background .2s}
+.mtile:active{transform:scale(.94)}
+.mtile.gem{background:rgba(16,185,129,.14);border-color:rgba(16,185,129,.35);color:var(--em)}
+.mtile.boom{background:rgba(239,68,68,.2);border-color:rgba(239,68,68,.5);color:var(--red);animation:pop .3s}
+.mtile.dim{opacity:.35}
+.statrow{display:flex;justify-content:space-around;text-align:center}
+.stat-v{font-size:20px;font-weight:700;color:var(--em)}
+.stat-l{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.26);margin-top:2px}
+
+/* dice */
+.dbarwrap{position:relative;padding:26px 0}
+.dbar{height:16px;border-radius:9px;background:rgba(255,255,255,.06);overflow:hidden;display:flex}
+.dbar i{display:block;height:100%}
+.dmark{position:absolute;top:14px;width:3px;height:40px;background:#fff;border-radius:2px;transform:translateX(-50%)}
+.dknob{position:absolute;top:19px;width:26px;height:26px;border-radius:50%;background:#fff;transform:translateX(-50%);box-shadow:0 3px 10px rgba(0,0,0,.6);cursor:grab}
+.drange{position:absolute;inset:20px 0 auto;width:100%;opacity:0;height:26px;cursor:pointer}
+.dnum{font-size:52px;font-weight:700;text-align:center}
+
+/* roulette */
+.rtable{display:grid;grid-template-columns:26px repeat(12,1fr);gap:3px;font-size:10px}
+.rz{border-radius:5px;padding:7px 0;text-align:center;cursor:pointer;border:1px solid transparent;color:rgba(255,255,255,.75);font-family:var(--pf);font-weight:700;position:relative;user-select:none}
+.rz.red{background:rgba(150,25,25,.5)}
+.rz.blk{background:rgba(255,255,255,.07)}
+.rz.grn{background:rgba(16,185,129,.35);grid-row:span 3}
+.rz.out{background:rgba(255,255,255,.05);font-size:9.5px;letter-spacing:.06em}
+.rz.hit{outline:2px solid var(--gold);z-index:2}
+.rz b{position:absolute;top:-5px;right:-4px;background:var(--gold);color:#1a1400;border-radius:8px;font-size:8.5px;padding:1px 4px}
+.routrow{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-top:3px}
+.routrow2{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin-top:3px}
+.rwheel{height:150px;position:relative;flex-shrink:0}
+
+/* rps */
+.rpsrow{display:flex;justify-content:center;align-items:center;gap:24px}
+.rpsslot{width:96px;height:96px;border-radius:50%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:38px}
+.rpsslot.win{border-color:var(--em);background:rgba(16,185,129,.12)}
+.rpsslot.lose{opacity:.4}
+.pips{display:flex;gap:5px;justify-content:center}
+.pip{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.12)}
+.pip.w{background:var(--em)}
+.pip.l{background:var(--red)}
+
+/* duels */
+.hpwrap{display:flex;gap:14px;align-items:flex-end;justify-content:center}
+.fighter{flex:1;max-width:150px;text-align:center}
+.hpbar{height:9px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden;margin-bottom:8px}
+.hpbar i{display:block;height:100%;background:var(--em);transition:width .35s}
+.hpbar.low i{background:var(--red)}
+.fbody{width:56px;height:80px;margin:34px auto 0;border-radius:24px 24px 14px 14px;background:rgba(255,255,255,.5);position:relative;transition:transform .18s}
+.fbody::before{content:'';position:absolute;top:-26px;left:50%;transform:translateX(-50%);width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.5)}
+.fighter.me .fbody{background:rgba(16,185,129,.75)}
+.fighter.me .fbody::before{background:rgba(16,185,129,.75)}
+.fbody.atkR{transform:translateX(22px)}
+.fbody.atkL{transform:translateX(-22px)}
+.fbody.hurt{filter:brightness(2) sepia(1) hue-rotate(-40deg) saturate(4)}
+.dmg{position:absolute;font-size:20px;font-weight:700;color:var(--red);animation:floatup .9s ease-out forwards;pointer-events:none}
+@keyframes floatup{to{transform:translateY(-42px);opacity:0}}
+.logline{text-align:center;font-size:12px;color:rgba(255,255,255,.35);font-style:italic;min-height:18px}
+
+/* uno */
+.upile{display:flex;justify-content:center;align-items:center;gap:16px;flex:1;min-height:120px}
+.ucard{width:54px;height:78px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;font-family:var(--pf);color:#fff;box-shadow:0 5px 14px rgba(0,0,0,.5);flex-shrink:0;cursor:pointer;transition:transform .15s}
+.ucard span{background:rgba(250,250,250,.92);border-radius:50%/40%;width:70%;height:52%;display:flex;align-items:center;justify-content:center;transform:rotate(-22deg)}
+.ucard.r{background:#c0392b}.ucard.b{background:#2563eb}.ucard.g{background:#0f9c6c}.ucard.y{background:#c9a227}
+.ucard.r span i{color:#c0392b}.ucard.b span i{color:#2563eb}.ucard.g span i{color:#0f9c6c}.ucard.y span i{color:#c9a227}
+.ucard i{font-style:normal;font-size:19px}
+.ucard.dead{opacity:.32;cursor:default}
+.ucard.big{width:74px;height:106px;cursor:default;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.ucard.big i{font-size:26px}
+.uhand{display:flex;gap:6px;overflow-x:auto;padding:10px 4px;scrollbar-width:none}
+.uhand::-webkit-scrollbar{display:none}
+.uhand .ucard:hover{transform:translateY(-8px)}
+.uopp{text-align:center;font-size:11.5px;color:rgba(255,255,255,.35)}
+.ubacks{display:flex;justify-content:center;gap:4px}
+.ubacks .ub{width:22px;height:32px;border-radius:4px;background:#0e1a16;border:1px solid rgba(16,185,129,.35)}
+
+/* coinflip */
+.cfrow{display:flex;justify-content:space-between;align-items:center;padding:0 6px}
+.cfp{text-align:center;flex:1}
+.cfp .n{font-size:13px;font-weight:700}
+.cfp .b{font-size:11px;color:var(--em);margin-top:2px}
+.cfp .s{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.28);margin-top:4px}
+.potlab{text-align:center;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.3)}
+.potval{text-align:center;font-size:24px;font-weight:700;color:var(--gold)}
+
+@media(min-width:900px){
+  .gactions{max-width:620px;margin:0 auto;width:100%;border-top:none}
+  .bigmul{font-size:78px}
+  .pc2{width:76px;height:108px;font-size:18px}
+  .pc2 .mid{font-size:34px}
+  .rtable{font-size:12px}
+  .rwheel{height:200px}
+}
+
+
+/* gesture controls */
+.holdpad{touch-action:none;user-select:none}
+.holdpad.held{background:#0e7a58;color:#eafff5}
+.ghint{text-align:center;font-size:11.5px;color:rgba(255,255,255,.28);font-style:italic;padding:4px 10px;line-height:1.5}
+.lever{position:absolute;right:16px;top:50%;transform:translateY(-50%);width:36px;height:158px;border-radius:22px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);touch-action:none;cursor:grab;user-select:none}
+.lknob{position:absolute;left:50%;margin-left:-14px;top:5px;width:28px;height:28px;border-radius:50%;background:var(--gold);box-shadow:0 4px 14px rgba(0,0,0,.55)}
+.throwpad{height:78px;border-radius:14px;background:rgba(255,255,255,.035);border:1px dashed rgba(255,255,255,.13);display:flex;align-items:center;justify-content:center;touch-action:none;user-select:none;position:relative;overflow:hidden}
+.tpin{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.38)}
+.swipecard{touch-action:none;cursor:grab}
+.udrag{position:relative;z-index:5;touch-action:none}
+
+/* additions for production */
+.gtop .balpill{padding:5px 10px;font-size:12px}
+.chips .chip.on{background:rgba(16,185,129,.14);border-color:rgba(16,185,129,.35);color:var(--em)}
+.res-acts{display:flex;gap:8px;width:100%;max-width:380px}
+.res-acts .ga{flex:1}
+.res-seed{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:rgba(255,255,255,.22);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gerr{font-size:12px;color:#f87171;min-height:16px;text-align:center}
+.feed{position:absolute;top:10px;right:12px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;pointer-events:none;z-index:3}
+.feed span{font-size:11px;padding:3px 9px;border-radius:9px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.25);color:#6ee7b7;animation:feedIn .3s ease-out}
+@keyframes feedIn{from{opacity:0;transform:translateX(10px)}}
+.phase{position:absolute;top:12px;left:14px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.3);z-index:3}
+.betstrip{display:flex;gap:8px;align-items:center;width:100%}
+.betstrip .bt-inp{font-size:18px;padding:12px;flex:1;min-width:0}

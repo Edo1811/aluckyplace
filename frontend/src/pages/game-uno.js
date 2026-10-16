@@ -1,216 +1,116 @@
 import socket from '../socket.js';
-import { store } from '../store.js';
+import { $, later } from '../ui/core.js';
+import { on } from '../games/shell.js';
+import { pvpShell } from '../games/pvp.js';
 
-const COLOR_CSS = { red:'#ef4444', blue:'#3b82f6', green:'#10b981', yellow:'#eab308', wild:'#a855f7' };
+// Server state: { hand, opp_hand_size, top_card, current_color, your_turn }.
+// Moves: card index, 'index:color' for wilds, or 'draw'. 10s per turn — no move means draw.
+const CLS = { red: 'r', blue: 'b', green: 'g', yellow: 'y', wild: 'k' };
+const SHOW = { skip: '⊘', reverse: '⇄', '+2': '+2', wild: 'W', 'wild+4': '+4' };
+const STYLE = `
+.ucard.k{background:conic-gradient(#c0392b 0 25%,#2563eb 0 50%,#0f9c6c 0 75%,#c9a227 0)}
+.ucard.k span i{color:#141414}
+.ucolor{display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;color:rgba(255,255,255,.4);letter-spacing:.12em;text-transform:uppercase}
+.ucolor i{width:12px;height:12px;border-radius:50%;display:inline-block}
+.uturn{text-align:center;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,.3)}
+.uturn.me{color:var(--em)}
+.wildpick{position:absolute;inset:0;background:rgba(5,5,5,.82);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:6}
+.wildpick div{display:grid;grid-template-columns:repeat(2,72px);gap:10px}
+.wildpick button{height:72px;border-radius:14px;border:none;cursor:pointer}
+`;
+const COLORS = { red: '#c0392b', blue: '#2563eb', green: '#0f9c6c', yellow: '#c9a227' };
 
-export function renderUno(app, matchData) {
-  const { matchId, pot, state: initState } = matchData;
-  let gameState = initState || {};
-  let pendingWild = false;
+const cardHTML = (c, i, cls = '') => `<button class="ucard ${CLS[c.color] || 'k'}${cls}" ${i !== null ? `data-i="${i}"` : ''}><span><i>${SHOW[c.value] || c.value}</i></span></button>`;
 
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .up{display:flex;flex-direction:column;height:100vh;background:radial-gradient(ellipse at 50% 30%,#1a0814 0%,#050505 70%);font-family:'Playfair Display',Georgia,serif;color:#fff;overflow:hidden}
-      .topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
-      .game-lbl{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-      .pot-lbl{font-size:13px;color:rgba(255,255,255,.4)}
-      .pot-lbl span{color:#D4AF37;font-weight:700}
-      .main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:space-around;padding:14px;gap:10px;overflow:hidden}
-      .opp-info{display:flex;align-items:center;gap:10px;font-size:13px;color:rgba(255,255,255,.5)}
-      .opp-count{font-size:22px;font-weight:700;color:#ef4444}
-      .center-area{display:flex;gap:20px;align-items:center}
-      .draw-pile{width:70px;height:98px;border-radius:9px;background:linear-gradient(135deg,#3b1f6b,#1a0835);border:2px solid rgba(168,85,247,.3);display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer;transition:all .15s}
-      .draw-pile:hover{transform:scale(1.05)}
-      .top-card{width:70px;height:98px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:22px;font-weight:700;border:2px solid rgba(255,255,255,.2);gap:4px}
-      .turn-indicator{font-size:12px;letter-spacing:.1em;text-transform:uppercase;min-height:18px}
-      .turn-indicator.your-turn{color:#10b981}
-      .turn-indicator.their-turn{color:rgba(255,255,255,.3)}
-      .hand-area{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%}
-      .hand{display:flex;gap:6px;overflow-x:auto;padding:6px 2px;scrollbar-width:none;max-width:100%;justify-content:center;flex-wrap:wrap}
-      .hand::-webkit-scrollbar{display:none}
-      .hcard{width:58px;height:82px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:16px;font-weight:700;cursor:pointer;border:2px solid transparent;transition:all .15s;gap:3px;flex-shrink:0}
-      .hcard:hover{transform:translateY(-8px)}
-      .hcard.unplayable{opacity:.4;cursor:not-allowed;transform:none}
-      .hcard.disabled{pointer-events:none}
-      .action-row{display:flex;gap:8px}
-      .uno-btn{padding:8px 20px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#ef4444;font-size:13px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer}
-      .uno-btn:hover{background:rgba(239,68,68,.25)}
-      /* Color picker */
-      .color-picker{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);align-items:center;justify-content:center;z-index:100;flex-direction:column;gap:14px}
-      .color-picker.show{display:flex}
-      .cp-title{font-size:18px;font-weight:700}
-      .cp-colors{display:flex;gap:12px}
-      .cp-col{width:60px;height:60px;border-radius:50%;cursor:pointer;border:3px solid rgba(255,255,255,.2);transition:all .15s}
-      .cp-col:hover{transform:scale(1.12);border-color:#fff}
-      /* Result */
-      .result-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);align-items:center;justify-content:center;flex-direction:column;gap:14px;z-index:200}
-      .result-overlay.show{display:flex}
-      .res-title{font-size:42px;font-weight:700}
-      .res-btn{padding:12px 36px;background:#10b981;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer}
-    </style>
-    <div class="up">
-      <div class="topbar">
-        <div class="game-lbl">Uno · PvP</div>
-        <div class="pot-lbl">Pot: <span>${pot.toLocaleString()} CC</span></div>
-      </div>
-      <div class="main">
-        <div class="opp-info">Opponent: <span class="opp-count" id="oppCount">5</span> cards</div>
-        <div class="center-area">
-          <div class="draw-pile" id="drawPile" title="Draw a card">🂠</div>
-          <div class="top-card" id="topCard">?</div>
-        </div>
-        <div class="turn-indicator" id="turnIndicator"></div>
-        <div class="hand-area">
-          <div class="hand" id="hand"></div>
-          <div class="action-row">
-            <button class="uno-btn" id="unoBtn" style="display:none">UNO!</button>
-          </div>
-        </div>
-      </div>
-    </div>
+export function renderUno(app, md) {
+  const p = pvpShell(app, md, {
+    game: 'uno', title: 'Uno', css: STYLE,
+    stage: `<div class="pad" style="position:relative">
+      <div class="uopp"><span id="unOppN"></span> · <span id="unOppC">0</span> cards</div>
+      <div class="ubacks" id="unBacks"></div>
+      <div class="upile"><div id="unPile"></div></div>
+      <div class="ucolor" id="unColor"></div>
+      <div class="uturn" id="unTurn"></div>
+      <div class="logline" id="unLog">Match the colour or the number</div>
+      <div class="ghint">Drag a card up onto the pile to play it</div>
+      <div class="uhand" id="unHand"></div>
+    </div>`,
+  });
+  if (!p) return;
+  $('unOppN').textContent = md.opponent || 'Opponent';
 
-    <!-- Color picker -->
-    <div class="color-picker" id="colorPicker">
-      <div class="cp-title">Choose a color</div>
-      <div class="cp-colors">
-        ${['red','blue','green','yellow'].map(c =>
-          `<div class="cp-col" style="background:${COLOR_CSS[c]}" data-color="${c}"></div>`
-        ).join('')}
-      </div>
-    </div>
+  let st = md.state || {}, lock = false, result = null, ended = false, prevOpp = st.opp_hand_size;
 
-    <!-- Result overlay -->
-    <div class="result-overlay" id="resultOverlay">
-      <div class="res-title" id="resTitle"></div>
-      <button class="res-btn" onclick="window.__navigate('games')">Back to Games</button>
-    </div>
-  `;
+  const playable = (c) => c.color === 'wild' || c.color === st.current_color || c.value === st.top_card?.value;
 
-  function renderState(state) {
-    if (!state) return;
-    gameState = state;
-    const { hand, opp_hand_size, top_card, current_color, your_turn } = state;
-
-    // Top card
-    const tc = document.getElementById('topCard');
-    if (tc && top_card) {
-      const col = current_color || top_card.color;
-      tc.style.background = COLOR_CSS[col] || '#555';
-      tc.style.borderColor = 'rgba(255,255,255,.3)';
-      tc.innerHTML = `<span style="font-size:11px;opacity:.7;text-transform:uppercase">${col}</span><span>${top_card.value}</span>`;
-    }
-
-    // Opp count
-    const oc = document.getElementById('oppCount');
-    if (oc) oc.textContent = opp_hand_size ?? '?';
-
-    // Turn indicator
-    const ti = document.getElementById('turnIndicator');
-    if (ti) {
-      ti.textContent   = your_turn ? '⬆ Your Turn' : 'Opponent\'s Turn';
-      ti.className     = `turn-indicator ${your_turn ? 'your-turn' : 'their-turn'}`;
-    }
-
-    // Hand
-    const handEl = document.getElementById('hand');
-    if (handEl && hand) {
-      handEl.innerHTML = hand.map((card, i) => {
-        const col = COLOR_CSS[card.color] || '#555';
-        const playable = your_turn && canPlay(card, top_card, current_color);
-        return `<div class="hcard${playable ? '' : ' unplayable'}" data-idx="${i}"
-          style="background:${col};color:#fff;border-color:rgba(255,255,255,.2)">
-          <span style="font-size:9px;opacity:.7">${card.color}</span>
-          <span>${card.value}</span>
-        </div>`;
-      }).join('');
-
-      // Draw pile click
-      document.getElementById('drawPile').onclick = () => {
-        if (!gameState.your_turn) return;
-        socket.emit('pvp:move', { match_id: matchId, move: 'draw' });
-        disableHand();
-      };
-
-      // Card click
-      handEl.querySelectorAll('.hcard:not(.unplayable)').forEach(el => {
-        el.addEventListener('click', () => {
-          const idx = el.dataset.idx;
-          const card = hand[idx];
-          if (!card) return;
-          if (card.color === 'wild') {
-            pendingWild = idx;
-            document.getElementById('colorPicker').classList.add('show');
-          } else {
-            socket.emit('pvp:move', { match_id: matchId, move: idx });
-            disableHand();
-          }
-        });
-      });
-    }
-
-    // Uno button
-    const unoBtn = document.getElementById('unoBtn');
-    if (unoBtn) unoBtn.style.display = hand?.length === 1 && your_turn ? 'block' : 'none';
+  function render() {
+    $('unPile').innerHTML = st.top_card ? cardHTML(st.top_card, null, ' big') : '';
+    $('unOppC').textContent = st.opp_hand_size ?? 0;
+    $('unBacks').innerHTML = '<div class="ub"></div>'.repeat(Math.min(st.opp_hand_size || 0, 12));
+    $('unColor').innerHTML = st.current_color ? `<i style="background:${COLORS[st.current_color]}"></i>${st.current_color}` : '';
+    const mine = st.your_turn && !ended;
+    $('unTurn').textContent = ended ? '' : mine ? 'Your turn' : `${md.opponent}'s turn`;
+    $('unTurn').className = `uturn${mine ? ' me' : ''}`;
+    $('unHand').innerHTML = (st.hand || []).map((c, i) => cardHTML(c, i, mine && playable(c) ? '' : ' dead')).join('');
+    $('unHand').querySelectorAll('[data-i]').forEach(bindDrag);
+    const a = p.shell.actions(mine ? '<button class="ga" id="unDraw">Draw a card</button>' : '');
+    if (mine) a.querySelector('#unDraw').onclick = () => send('draw');
+    p.timer(mine ? 10000 : 0);
+    lock = !mine;
+  }
+  function bindDrag(b) {
+    const i = Number(b.dataset.i);
+    let down = false, x0 = 0, y0 = 0, dx = 0, dy = 0;
+    b.style.touchAction = 'none';
+    b.addEventListener('pointerdown', (e) => {
+      if (lock || b.classList.contains('dead')) return;
+      down = true; x0 = e.clientX; y0 = e.clientY; dx = dy = 0;
+      b.style.transition = 'none'; b.classList.add('udrag');
+      try { b.setPointerCapture(e.pointerId); } catch { /* */ }
+    });
+    b.addEventListener('pointermove', (e) => { if (!down) return; dx = e.clientX - x0; dy = e.clientY - y0; b.style.transform = `translate(${dx}px,${dy}px) scale(1.06)`; });
+    const up = () => {
+      if (!down) return; down = false;
+      b.style.transition = 'transform .2s'; b.style.transform = ''; b.classList.remove('udrag');
+      if (dy < -60 || Math.hypot(dx, dy) < 9) play(i);
+    };
+    b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
+  }
+  function play(i) {
+    const c = st.hand[i]; if (!c || lock || !playable(c)) return;
+    if (c.color !== 'wild') return send(String(i));
+    const pick = document.createElement('div'); pick.className = 'wildpick';
+    pick.innerHTML = `<div class="logline">Pick a colour</div><div>${Object.entries(COLORS).map(([k, v]) => `<button data-c="${k}" style="background:${v}" aria-label="${k}"></button>`).join('')}</div>`;
+    $('gstage').appendChild(pick);
+    pick.querySelectorAll('[data-c]').forEach((x) => x.addEventListener('click', () => { pick.remove(); send(`${i}:${x.dataset.c}`); }));
+  }
+  function send(move) {
+    if (lock) return;
+    lock = true; p.timer(0);
+    $('unHand').querySelectorAll('.ucard').forEach((x) => x.classList.add('dead'));
+    const d = $('unDraw'); if (d) d.disabled = true;
+    $('unLog').textContent = move === 'draw' ? 'Drawing…' : 'Played';
+    p.move(move);
   }
 
-  function canPlay(card, topCard, currentColor) {
-    if (!topCard) return true;
-    if (card.color === 'wild') return true;
-    if (card.color === currentColor) return true;
-    if (card.value === topCard.value) return true;
-    return false;
-  }
-
-  function disableHand() {
-    document.querySelectorAll('.hcard').forEach(c => c.classList.add('disabled'));
-    document.getElementById('drawPile').onclick = null;
-  }
-
-  // Color picker
-  document.getElementById('colorPicker').addEventListener('click', e => {
-    const col = e.target.dataset.color;
-    if (!col) return;
-    document.getElementById('colorPicker').classList.remove('show');
-    if (pendingWild !== null) {
-      socket.emit('pvp:move', { match_id: matchId, move: `${pendingWild}:${col}` });
-      pendingWild = null;
-      disableHand();
-    }
+  on(socket, {
+    'pvp:round_result': ({ state }) => {
+      if (!state) return;
+      const wasMine = st.your_turn;
+      const oppDelta = (state.opp_hand_size ?? 0) - (prevOpp ?? 0);
+      if (!wasMine) $('unLog').textContent = oppDelta < 0 ? `${md.opponent} played ${SHOW[state.top_card.value] || state.top_card.value}` : `${md.opponent} drew`;
+      else if (state.top_card && state.hand.length < (st.hand || []).length) $('unLog').textContent = 'Played';
+      else $('unLog').textContent = 'You drew a card';
+      if (wasMine && state.your_turn && !ended) $('unLog').textContent += ' · go again';
+      prevOpp = state.opp_hand_size; st = state;
+      if (!state.hand.length || !state.opp_hand_size) ended = true;
+      render();
+    },
+    'pvp:result': (r) => {
+      result = r; ended = true; render();
+      later(1200, () => p.finish({ won: result.you_won, seed: result.seed, sub: result.you_won ? 'Emptied your hand first' : `${md.opponent} went out first` }));
+    },
   });
 
-  // Uno button
-  document.getElementById('unoBtn').addEventListener('click', () => {
-    socket.emit('pvp:move', { match_id: matchId, move: 'uno' });
-  });
-
-  // Initial render
-  renderState(initState);
-
-  socket.on('pvp:round_result', ({ state }) => {
-    renderState(state);
-  });
-
-  socket.on('pvp:result', ({ you_won }) => {
-    const overlay = document.getElementById('resultOverlay');
-    const title   = document.getElementById('resTitle');
-    title.textContent = you_won ? '🃏 You Win!' : 'You Lose';
-    title.style.color = you_won ? '#10b981' : '#ef4444';
-    overlay.classList.add('show');
-    socket.off('pvp:round_result');
-    socket.off('pvp:result');
-    socket.off('pvp:auto_win');
-  });
-
-  socket.on('pvp:auto_win', () => {
-    const overlay = document.getElementById('resultOverlay');
-    document.getElementById('resTitle').textContent = '🃏 You Win!';
-    document.getElementById('resTitle').style.color = '#10b981';
-    overlay.classList.add('show');
-    socket.off('pvp:round_result');
-    socket.off('pvp:result');
-    socket.off('pvp:auto_win');
-  });
+  render();
 }

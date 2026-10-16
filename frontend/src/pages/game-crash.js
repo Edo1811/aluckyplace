@@ -1,312 +1,185 @@
 import socket from '../socket.js';
-import { store, updateBalance } from '../store.js';
+import { store } from '../store.js';
+import { $, fmt, toast, later, every } from '../ui/core.js';
+import { gameShell, fitCanvas, loop, on, syncBalance } from '../games/shell.js';
+import { pressPad, EM, RED, w } from '../games/draw.js';
 
-let roundId = null, myBet = 0, cashedOut = false, phase = 'betting';
-let multiplier = 1.00, startedAt = null;
-let animId = null, points = [];
-let chatMessages = [];
+// Shared round run by the server:
+//   crash:betting_open (6s) → crash:start → crash:tick every 100ms → crash:crash → 2s pause
+// The curve is exp(t * 0.35). Bets can only be placed during the betting window,
+// so "Play again" queues the same bet for the next window.
+const RATE = 0.35;
+const STYLE = `
+.crwrap{position:absolute;inset:0}
+.crcd{position:absolute;left:0;right:0;top:44%;text-align:center;pointer-events:none}
+.crcd b{display:block;font-size:46px;font-weight:700;color:#fff}
+.crcd span{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.35)}
+.crme{position:absolute;left:14px;bottom:12px;font-size:12px;color:rgba(255,255,255,.4);z-index:3}
+.crme b{color:var(--em)}
+.crhist{position:absolute;top:34px;left:14px;display:flex;gap:5px;z-index:3;flex-wrap:wrap;max-width:60%}
+.crhist span{font-size:10.5px;padding:2px 7px;border-radius:8px;background:rgba(255,255,255,.05);color:rgba(255,255,255,.5)}
+.crhist span.hi{color:var(--em);background:rgba(16,185,129,.1)}
+.crhist span.lo{color:#f87171;background:rgba(239,68,68,.08)}
+`;
 
 export function renderCrash(app) {
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after { margin:0; padding:0; box-sizing:border-box }
-      body { background:#050505 }
-      .cp { display:flex; flex-direction:column; height:100vh; background:#050505; font-family:'Playfair Display',Georgia,serif; color:#fff }
-      .topbar { display:flex; align-items:center; gap:12px; padding:12px 18px; border-bottom:1px solid rgba(255,255,255,.06); flex-shrink:0 }
-      .back { padding:6px 14px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09); border-radius:8px; color:rgba(255,255,255,.5); font-size:12px; cursor:pointer; font-family:'Playfair Display',Georgia,serif }
-      .back:hover { background:rgba(255,255,255,.09) }
-      .game-title { font-size:16px; font-weight:700 }
-      .bal-chip { margin-left:auto; font-size:12px; color:rgba(255,255,255,.4) }
-      .bal-chip span { color:#10b981; font-weight:700 }
-      .main { display:flex; flex:1; overflow:hidden }
-      .graph-side { flex:1; display:flex; flex-direction:column; position:relative }
-      canvas#crashCanvas { flex:1; display:block; width:100%; }
-      .mult-overlay { position:absolute; top:16px; right:20px; font-size:42px; font-weight:700; font-family:'Playfair Display',Georgia,serif; transition:color .2s }
-      .phase-label { position:absolute; top:16px; left:20px; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:rgba(255,255,255,.3) }
-      .bet-panel { width:220px; flex-shrink:0; border-left:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; padding:16px; gap:10px }
-      .bp-label { font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:rgba(255,255,255,.25) }
-      .bp-input { width:100%; padding:10px 12px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); border-radius:8px; color:#fff; font-size:15px; font-weight:700; font-family:'Playfair Display',Georgia,serif; outline:none }
-      .bp-input:focus { border-color:rgba(16,185,129,.4) }
-      .bp-btn { width:100%; padding:12px; border:none; border-radius:9px; font-size:14px; font-weight:700; font-family:'Playfair Display',Georgia,serif; cursor:pointer; transition:all .15s }
-      .bp-btn.bet { background:#10b981; color:#fff }
-      .bp-btn.bet:hover { background:#0ea472 }
-      .bp-btn.bet:disabled { background:rgba(255,255,255,.08); color:rgba(255,255,255,.25); cursor:not-allowed }
-      .bp-btn.cash { background:#D4AF37; color:#000 }
-      .bp-btn.cash:hover { background:#c9a42e }
-      .bp-btn.cash:disabled { background:rgba(255,255,255,.08); color:rgba(255,255,255,.25); cursor:not-allowed }
-      .bp-status { font-size:11px; color:rgba(255,255,255,.3); font-style:italic; text-align:center; min-height:16px }
-      .bp-status.green { color:#10b981 }
-      .bp-status.red   { color:#ef4444 }
-      .bp-divider { height:1px; background:rgba(255,255,255,.06) }
-      .chat-section { flex:1; display:flex; flex-direction:column; overflow:hidden }
-      .chat-label { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:rgba(255,255,255,.2); margin-bottom:6px }
-      .chat-msgs { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:5px; scrollbar-width:none }
-      .chat-msgs::-webkit-scrollbar { display:none }
-      .cmsg { font-size:11.5px; line-height:1.45 }
-      .cmsg .cu { color:#10b981; font-weight:700 }
-      .cmsg .ct { color:rgba(255,255,255,.55) }
-      .chat-input-row { display:flex; gap:6px; margin-top:8px }
-      .chat-inp { flex:1; padding:7px 10px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); border-radius:7px; color:#fff; font-size:12px; font-family:'Playfair Display',Georgia,serif; outline:none }
-      .chat-inp:focus { border-color:rgba(16,185,129,.3) }
-      .chat-send { padding:7px 12px; background:rgba(16,185,129,.12); border:1px solid rgba(16,185,129,.2); border-radius:7px; color:#10b981; font-size:11px; font-weight:700; font-family:'Playfair Display',Georgia,serif; cursor:pointer }
-      .hash-bar { padding:6px 12px; background:rgba(255,255,255,.025); border-top:1px solid rgba(255,255,255,.05); font-size:9.5px; color:rgba(255,255,255,.2); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:0 }
-    </style>
-    <div class="cp">
-      <div class="topbar">
-        <button class="back" id="backBtn">← Games</button>
-        <span class="game-title">Crash</span>
-        <span class="bal-chip">Balance: <span id="balDisplay">${Number(store.ccBalance).toLocaleString()}</span> CC</span>
-      </div>
-      <div class="main">
-        <div class="graph-side">
-          <canvas id="crashCanvas"></canvas>
-          <div class="mult-overlay" id="multOverlay" style="color:#10b981">1.00×</div>
-          <div class="phase-label" id="phaseLabel">Betting open</div>
-        </div>
-        <div class="bet-panel">
-          <div class="bp-label">Your Bet</div>
-          <input class="bp-input" id="betInput" type="number" min="10" placeholder="10" value="100">
-          <button class="bp-btn bet" id="betBtn">Place Bet</button>
-          <button class="bp-btn cash" id="cashBtn" disabled>Cash Out</button>
-          <div class="bp-status" id="bpStatus">Waiting for betting window…</div>
-          <div class="bp-divider"></div>
-          <div class="chat-section">
-            <div class="chat-label">Live Chat</div>
-            <div class="chat-msgs" id="chatMsgs"></div>
-            <div class="chat-input-row">
-              <input class="chat-inp" id="chatInp" placeholder="Say something…" maxlength="200">
-              <button class="chat-send" id="chatSend">Send</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="hash-bar" id="hashBar">Waiting for next round…</div>
-    </div>
-  `;
+  const shell = gameShell(app, {
+    id: 'crash', title: 'Crash', css: STYLE,
+    stage: `<div class="crwrap"><canvas class="fill" id="cvC"></canvas></div>
+      <div class="phase" id="crPhase">Connecting</div>
+      <div class="crhist" id="crHist"></div>
+      <div class="feed" id="crFeed"></div>
+      <div class="bigmul" id="crM" style="display:none">1.00×</div>
+      <div class="crcd" id="crCd"><b id="crCdN">—</b><span>until launch</span></div>
+      <div class="crme" id="crMe"></div>`,
+  });
 
-  setupCanvas();
-  bindSocketEvents();
-  bindUI();
-}
+  // round state
+  let phase = 'waiting', roundId = null, t = 0, mult = 1, crashAt = null, flash = 0, bettingEnds = 0;
+  // my state for the current round
+  let myBet = 0, cashedAt = 0, queued = 0, pts = [];
+  const hist = [];
 
-function setupCanvas() {
-  const canvas = document.getElementById('crashCanvas');
-  const resize = () => {
-    const p = canvas.parentElement;
-    canvas.width  = p.clientWidth;
-    canvas.height = p.clientHeight;
+  const setActions = (html) => shell.actions(html);
+  const me = () => {
+    const el = $('crMe'); if (!el) return;
+    el.innerHTML = myBet ? (cashedAt ? `Cashed at <b>${cashedAt.toFixed(2)}×</b> · +${fmt(Math.floor(myBet * cashedAt))} CC` : `In for <b>${fmt(myBet)} CC</b>`)
+      : queued ? `Next round: <b>${fmt(queued)} CC</b>` : '';
   };
-  resize();
-  try { new ResizeObserver(resize).observe(canvas.parentElement); } catch(e) {}
-  animId = requestAnimationFrame(drawLoop);
-}
 
-function drawLoop() {
-  const canvas = document.getElementById('crashCanvas');
-  if (!canvas) { animId = null; return; }
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-
-  const isCrashed = phase === 'crashed';
-  const color = isCrashed ? '#ef4444' : '#10b981';
-
-  // Grid lines
-  ctx.strokeStyle = 'rgba(255,255,255,.04)'; ctx.lineWidth = 0.5;
-  for (let i = 1; i < 4; i++) {
-    const y = H * 0.1 + i * (H * 0.72 / 4);
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-  }
-
-  if (points.length > 1) {
-    // Fill
-    const grad = ctx.createLinearGradient(0, H * 0.1, 0, H * 0.85);
-    grad.addColorStop(0, isCrashed ? 'rgba(239,68,68,.18)' : 'rgba(16,185,129,.15)');
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, H * 0.85);
-    points.forEach(p => ctx.lineTo(p.x, p.y));
-    ctx.lineTo(points[points.length-1].x, H * 0.85);
-    ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
-    // Line
-    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
-    points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-    ctx.stroke();
-  }
-
-  animId = requestAnimationFrame(drawLoop);
-}
-
-function pushPoint(mult) {
-  const canvas = document.getElementById('crashCanvas');
-  if (!canvas) return;
-  const W = canvas.width, H = canvas.height;
-  const maxMult = Math.max(mult * 1.2, 2);
-  const t = (mult - 1) / (maxMult - 1);
-  const x = W * 0.06 + (W * 0.88) * ((Date.now() - startedAt) / Math.max(Date.now() - startedAt, 1));
-  // Recalculate all points based on current mult range
-  if (!startedAt) return;
-  const elapsed = (Date.now() - startedAt) / 1000;
-  const newPts = [];
-  for (let s = 0; s <= elapsed; s += 0.1) {
-    const m = Math.max(1, Math.exp(s * 0.35));
-    const px = W * 0.06 + (s / Math.max(elapsed, 1)) * W * 0.88;
-    const py = H * 0.85 - ((m - 1) / (maxMult - 1)) * (H * 0.72);
-    newPts.push({ x: px, y: Math.max(H * 0.1, py) });
-  }
-  points = newPts;
-}
-
-function updateMultOverlay(mult, crashed = false) {
-  const el = document.getElementById('multOverlay');
-  if (!el) return;
-  el.textContent = crashed ? `CRASHED ${mult.toFixed(2)}×` : `${mult.toFixed(2)}×`;
-  el.style.color = crashed ? '#ef4444' : mult > 3 ? '#D4AF37' : '#10b981';
-}
-
-function setStatus(msg, cls = '') {
-  const el = document.getElementById('bpStatus');
-  if (el) { el.textContent = msg; el.className = 'bp-status ' + cls; }
-}
-
-function addChat(username, text) {
-  chatMessages.push({ username, text });
-  if (chatMessages.length > 50) chatMessages.shift();
-  const el = document.getElementById('chatMsgs');
-  if (!el) return;
-  const div = document.createElement('div');
-  div.className = 'cmsg';
-  div.innerHTML = `<span class="cu">${username}:</span> <span class="ct">${text}</span>`;
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
-}
-
-function bindSocketEvents() {
-  // Current state on join
-  socket.on('crash:state', (data) => {
-    roundId = data.round_id;
-    phase   = data.phase;
-    if (data.phase === 'active') {
-      startedAt = data.started_at;
-      multiplier = data.multiplier || 1;
+  function paintActions() {
+    if (phase === 'active' && myBet && !cashedAt) {
+      const b = setActions('<button class="ga ga-em holdpad" id="crHold">Riding — let go to cash out</button>').firstChild;
+      pressPad(b, { down: () => b.classList.add('held'), up: () => { b.classList.remove('held'); cashout(); } });
+      return;
     }
-    updatePhaseUI();
-  });
-
-  socket.on('crash:betting_open', ({ round_id, hash }) => {
-    roundId = round_id; phase = 'betting'; myBet = 0; cashedOut = false;
-    points = []; startedAt = null; multiplier = 1;
-    document.getElementById('betBtn').disabled  = false;
-    document.getElementById('cashBtn').disabled = true;
-    document.getElementById('betInput').disabled = false;
-    document.getElementById('phaseLabel').textContent = 'Betting open — 6s';
-    document.getElementById('hashBar').textContent = `Round hash: ${hash}`;
-    updateMultOverlay(1);
-    setStatus('Place your bet!');
-  });
-
-  socket.on('crash:start', ({ started_at }) => {
-    phase = 'active'; startedAt = started_at;
-    document.getElementById('phaseLabel').textContent = 'In progress';
-    document.getElementById('betBtn').disabled   = true;
-    document.getElementById('betInput').disabled = true;
-    if (myBet > 0 && !cashedOut) {
-      document.getElementById('cashBtn').disabled = false;
-      setStatus(`Bet: ${myBet.toLocaleString()} CC — cash out!`, 'green');
-    } else if (!myBet) {
-      setStatus('Watching this round');
-    }
-  });
-
-  socket.on('crash:tick', ({ multiplier: m }) => {
-    multiplier = m;
-    updateMultOverlay(m);
-    pushPoint(m);
-  });
-
-  socket.on('crash:cashout:confirm', ({ multiplier: m, payout, cc_balance }) => {
-    cashedOut = true;
-    document.getElementById('cashBtn').disabled = true;
-    updateBalance({ cc_balance });
-    document.getElementById('balDisplay').textContent = Number(cc_balance).toLocaleString();
-    setStatus(`Cashed out at ${m.toFixed(2)}× — +${(payout - myBet).toLocaleString()} CC 🎉`, 'green');
-  });
-
-  socket.on('crash:cashout:broadcast', ({ username, multiplier: m }) => {
-    addChat('🎰 System', `${username} cashed out at ${m.toFixed(2)}×`);
-  });
-
-  socket.on('crash:crash', ({ crash_point, seed }) => {
-    phase = 'crashed';
-    updateMultOverlay(crash_point, true);
-    document.getElementById('phaseLabel').textContent = `Crashed at ${crash_point.toFixed(2)}×`;
-    document.getElementById('cashBtn').disabled = true;
-    document.getElementById('hashBar').textContent = `Seed revealed: ${seed}`;
-    if (myBet > 0 && !cashedOut) setStatus(`Lost ${myBet.toLocaleString()} CC`, 'red');
-    points = []; startedAt = null;
-  });
-
-  socket.on('crash:chat:message', ({ username, text }) => addChat(username, text));
-
-  socket.on('crash:bet:confirm', ({ amount, cc_balance }) => {
-    myBet = amount;
-    updateBalance({ cc_balance });
-    document.getElementById('balDisplay').textContent = Number(cc_balance).toLocaleString();
-    setStatus(`Bet placed: ${amount.toLocaleString()} CC`, 'green');
-  });
-
-  socket.on('crash:error', ({ message }) => setStatus(message, 'red'));
-}
-
-function updatePhaseUI() {
-  if (phase === 'betting') {
-    document.getElementById('betBtn').disabled  = false;
-    document.getElementById('cashBtn').disabled = true;
-    document.getElementById('phaseLabel').textContent = 'Betting open';
-    setStatus('Place your bet!');
-  } else if (phase === 'active') {
-    document.getElementById('betBtn').disabled   = true;
-    document.getElementById('betInput').disabled = true;
-    document.getElementById('phaseLabel').textContent = 'In progress';
-    setStatus('Round in progress');
+    if (myBet) { setActions(`<button class="ga" disabled>${cashedAt ? `Cashed out · ${cashedAt.toFixed(2)}×` : `Bet in · ${fmt(myBet)} CC`}</button>`); return; }
+    if (queued) { setActions(`<button class="ga" id="crUnq">Cancel next-round bet</button>`); $('crUnq').onclick = () => { queued = 0; paintActions(); me(); }; return; }
+    setActions('<button class="ga ga-em" id="crBet">Place a bet</button>');
+    $('crBet').onclick = () => openBet();
   }
-}
 
-function bindUI() {
-  document.getElementById('backBtn').addEventListener('click', () => {
-    cleanup();
-    window.__navigate('games');
-  });
+  function openBet() {
+    shell.bet({
+      cta: phase === 'betting' ? 'Bet this round' : 'Bet next round',
+      note: phase === 'betting' ? 'Round is open — your bet goes in now' : 'Your bet goes in when the next round opens',
+      onPlace: (b) => { queued = b; shell.show('scPlay'); if (phase === 'betting') placeQueued(); paintActions(); me(); },
+    });
+  }
 
-  document.getElementById('betBtn').addEventListener('click', () => {
-    if (!roundId || phase !== 'betting') return;
-    const amount = Math.floor(Number(document.getElementById('betInput').value));
-    if (amount < 10) return setStatus('Minimum bet is 10 CC', 'red');
-    socket.emit('crash:bet', { round_id: roundId, amount });
-    document.getElementById('betBtn').disabled = true;
-  });
-
-  document.getElementById('cashBtn').addEventListener('click', () => {
-    if (!roundId || phase !== 'active' || cashedOut) return;
+  function placeQueued() {
+    if (!queued || myBet || phase !== 'betting' || !roundId) return;
+    socket.emit('crash:bet', { round_id: roundId, amount: queued });
+  }
+  function cashout() {
+    if (phase !== 'active' || !myBet || cashedAt) return;
     socket.emit('crash:cashout', { round_id: roundId });
+  }
+
+  function resetRound() { t = 0; mult = 1; crashAt = null; flash = 0; pts = []; myBet = 0; cashedAt = 0; }
+
+  on(socket, {
+    'crash:state': ({ phase: p, round_id, multiplier, betting_ms_left, my_bet, cashed_out }) => {
+      roundId = round_id;
+      resetRound();
+      myBet = Number(my_bet) || 0; cashedAt = Number(cashed_out) || 0;
+      if (p === 'active') { phase = 'active'; mult = multiplier || 1; t = Math.log(mult) / RATE; }
+      else if (p === 'betting') { phase = 'betting'; bettingEnds = performance.now() + (betting_ms_left ?? 3000); placeQueued(); }
+      else phase = 'crashed';
+      paintActions(); me();
+    },
+    'crash:betting_open': ({ round_id }) => {
+      resetRound(); roundId = round_id; phase = 'betting'; bettingEnds = performance.now() + 6000;
+      placeQueued(); paintActions(); me();
+    },
+    'crash:start': ({ round_id }) => { roundId = round_id; phase = 'active'; t = 0; mult = 1; paintActions(); },
+    'crash:tick': ({ multiplier }) => {
+      if (phase !== 'active') { phase = 'active'; paintActions(); }
+      // keep the local clock honest without jumping backwards
+      const tt = Math.log(multiplier) / RATE; if (Math.abs(tt - t) > 0.25) t = tt;
+    },
+    'crash:crash': ({ crash_point, seed }) => {
+      phase = 'crashed'; crashAt = crash_point; mult = crash_point; t = Math.log(crash_point) / RATE;
+      hist.unshift(crash_point); hist.length = Math.min(hist.length, 8);
+      $('crHist').innerHTML = hist.map((m) => `<span class="${m >= 2 ? 'hi' : m < 1.3 ? 'lo' : ''}">${m.toFixed(2)}×</span>`).join('');
+      if ('vibrate' in navigator && myBet && !cashedAt) navigator.vibrate(60);
+      paintActions();
+      if (myBet) {
+        const bet = myBet, ca = cashedAt;
+        later(1400, () => shell.result({
+          net: ca ? Math.floor(bet * ca) - bet : -bet,
+          sub: ca ? `Cashed out at ${ca.toFixed(2)}× · crashed at ${crash_point.toFixed(2)}×` : `Crashed at ${crash_point.toFixed(2)}×`,
+          seed,
+          againLabel: 'Bet again', again: () => { queued = bet; shell.show('scPlay'); placeQueued(); paintActions(); me(); },
+          change: () => openBet(),
+        }));
+      }
+    },
+    'crash:bet:confirm': ({ amount, cc_balance }) => { myBet = Number(amount); queued = 0; syncBalance(cc_balance); paintActions(); me(); },
+    'crash:cashout:confirm': ({ multiplier, payout, cc_balance }) => {
+      cashedAt = Number(multiplier); syncBalance(cc_balance); paintActions(); me();
+      toast(`Cashed out at ${cashedAt.toFixed(2)}× · +${fmt(payout)} CC`, 'em');
+    },
+    'crash:cashout:broadcast': ({ username, multiplier }) => {
+      if (username === store.user?.username) return;
+      const f = $('crFeed'); if (!f) return;
+      const s = document.createElement('span'); s.textContent = `${username} ${Number(multiplier).toFixed(2)}×`;
+      f.prepend(s); while (f.children.length > 4) f.lastChild.remove();
+      later(3500, () => s.remove());
+    },
+    'crash:error': ({ message }) => { toast(message || 'Crash error', 'red'); queued = 0; paintActions(); me(); },
   });
 
-  document.getElementById('chatSend').addEventListener('click', sendChat);
-  document.getElementById('chatInp').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
-}
+  // Ask for the current round (the server only pushes it on connect).
+  socket.emit('crash:sync');
 
-function sendChat() {
-  const inp = document.getElementById('chatInp');
-  if (!inp || !inp.value.trim()) return;
-  socket.emit('crash:chat', { text: inp.value.trim() });
-  inp.value = '';
-}
+  every(250, () => {
+    const p = $('crPhase'); if (!p) return;
+    const left = Math.max(0, Math.ceil((bettingEnds - performance.now()) / 1000));
+    p.textContent = phase === 'betting' ? `Betting open · ${left}s` : phase === 'active' ? 'In flight' : phase === 'crashed' ? 'Crashed' : 'Waiting for round';
+    $('crCd').style.display = phase === 'betting' ? '' : 'none';
+    $('crCdN').textContent = `${left}s`;
+    $('crM').style.display = phase === 'betting' ? 'none' : '';
+  });
 
-function cleanup() {
-  if (animId) { cancelAnimationFrame(animId); animId = null; }
-  socket.off('crash:state'); socket.off('crash:betting_open'); socket.off('crash:start');
-  socket.off('crash:tick');  socket.off('crash:crash');        socket.off('crash:cashout:confirm');
-  socket.off('crash:cashout:broadcast'); socket.off('crash:chat:message');
-  socket.off('crash:bet:confirm'); socket.off('crash:error');
+  const cv = $('cvC');
+  loop((dt) => {
+    if (phase === 'active') { t += dt; mult = Math.exp(t * RATE); pts.push([t, mult]); if (pts.length > 600) pts = pts.filter((_, i) => i % 2 === 0); }
+    if (phase === 'crashed') flash += dt;
+    const el = $('crM');
+    if (el) {
+      el.textContent = `${(crashAt || mult).toFixed(2)}×`;
+      el.style.color = phase === 'crashed' ? RED : cashedAt ? EM : '#fff';
+    }
+    const f = fitCanvas(cv); if (!f) return;
+    const { ctx: c, W, H } = f;
+    c.strokeStyle = w(0.03); c.lineWidth = 1;
+    for (let i = 0; i < 5; i++) { const y = H * 0.18 + i * (H * 0.72 / 4); c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+    if (phase === 'betting' || phase === 'waiting') return;
+    const span = Math.max(4, t * 1.12), top = Math.max(1.8, mult * 1.4);
+    const px = (x) => W * 0.06 + (x / span) * (W * 0.88);
+    const py = (m) => H * 0.9 - ((m - 1) / (top - 1)) * (H * 0.72);
+    const col = phase === 'crashed' ? '239,68,68' : '16,185,129';
+    const N = 64, curve = [];
+    for (let i = 0; i <= N; i++) { const x = (t * i) / N; curve.push([px(x), py(Math.exp(x * RATE))]); }
+    const g = c.createLinearGradient(0, H * 0.15, 0, H * 0.9);
+    g.addColorStop(0, `rgba(${col},.18)`); g.addColorStop(1, `rgba(${col},0)`);
+    c.beginPath(); c.moveTo(px(0), H * 0.9); curve.forEach(([x, y]) => c.lineTo(x, y)); c.lineTo(px(t), H * 0.9); c.closePath(); c.fillStyle = g; c.fill();
+    c.beginPath(); curve.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+    c.strokeStyle = `rgba(${col},.95)`; c.lineWidth = 3; c.lineJoin = 'round'; c.lineCap = 'round'; c.stroke();
+    if (cashedAt) {
+      const ct = Math.log(cashedAt) / RATE;
+      c.beginPath(); c.arc(px(ct), py(cashedAt), 6, 0, 7); c.fillStyle = EM; c.fill();
+      c.font = '700 12px "Playfair Display",Georgia,serif'; c.fillStyle = 'rgba(16,185,129,.9)'; c.textAlign = 'center';
+      c.fillText(`${cashedAt.toFixed(2)}×`, px(ct), py(cashedAt) - 14);
+    }
+    const hx = px(t), hy = py(mult);
+    c.beginPath(); c.arc(hx, hy, 5.5, 0, 7); c.fillStyle = phase === 'crashed' ? RED : EM; c.fill();
+    c.beginPath(); c.arc(hx, hy, 15 + (phase === 'active' ? Math.sin(performance.now() / 140) * 3 : 0), 0, 7); c.fillStyle = `rgba(${col},.14)`; c.fill();
+    if (phase === 'crashed') { c.fillStyle = `rgba(239,68,68,${0.16 * Math.max(0, 1 - flash)})`; c.fillRect(0, 0, W, H); }
+  });
+
+  shell.show('scPlay');
+  paintActions();
+  me();
 }

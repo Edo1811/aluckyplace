@@ -1,203 +1,111 @@
 import { api } from '../api.js';
-import { store, updateBalance } from '../store.js';
+import { store } from '../store.js';
+import { $, fmt, toast } from '../ui/core.js';
+import { gameShell, fitCanvas, loop, syncBalance } from '../games/shell.js';
+import { rr, w, em, gd, GOLD, EM, PF } from '../games/draw.js';
 
+// Server: 12 rows, path of 'L'/'R', slot 0–12.
+const ROWS = 12;
 const MULT = [250, 30, 6, 2, 0.5, 0.3, 0.2, 0.3, 0.5, 2, 6, 30, 250];
-const ROWS  = 12;
+const MAX_IN_FLIGHT = 30;
 
 export function renderPlinko(app) {
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .pp{display:flex;flex-direction:column;height:100vh;background:radial-gradient(ellipse at 50% 30%,#0d0a20 0%,#050505 70%);font-family:'Playfair Display',Georgia,serif;color:#fff}
-      .topbar{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
-      .back{padding:6px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:8px;color:rgba(255,255,255,.5);font-size:12px;cursor:pointer;font-family:'Playfair Display',Georgia,serif}
-      .game-title{font-size:16px;font-weight:700}
-      .bal-chip{margin-left:auto;font-size:12px;color:rgba(255,255,255,.4)}
-      .bal-chip span{color:#10b981;font-weight:700}
-      .main{flex:1;display:flex;align-items:center;justify-content:center;gap:20px;padding:16px;flex-wrap:wrap}
-      canvas#plinkoCanvas{border-radius:12px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07)}
-      .side{display:flex;flex-direction:column;gap:12px;width:170px}
-      .bet-label{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.25)}
-      .bet-inp{width:100%;padding:10px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-size:15px;font-weight:700;font-family:'Playfair Display',Georgia,serif;outline:none;text-align:center}
-      .bet-inp:focus{border-color:rgba(168,85,247,.4)}
-      .drop-btn{width:100%;padding:13px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer;transition:all .15s;box-shadow:0 4px 18px rgba(168,85,247,.3)}
-      .drop-btn:hover{transform:translateY(-1px);box-shadow:0 6px 22px rgba(168,85,247,.4)}
-      .drop-btn:disabled{background:rgba(255,255,255,.08);color:rgba(255,255,255,.25);cursor:not-allowed;transform:none;box-shadow:none}
-      .result-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:14px;text-align:center}
-      .res-mult{font-size:28px;font-weight:700;color:#10b981;min-height:36px}
-      .res-cc{font-size:13px;color:rgba(255,255,255,.4);margin-top:4px;min-height:18px}
-      .slots-label{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.2);margin-top:4px}
-      .slots-list{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;scrollbar-width:none}
-      .srow{display:flex;justify-content:space-between;font-size:11px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.03)}
-      .srow.hl{background:rgba(168,85,247,.12);color:#a855f7;font-weight:700}
-    </style>
-    <div class="pp">
-      <div class="topbar">
-        <button class="back" id="backBtn">← Games</button>
-        <span class="game-title">Plinko</span>
-        <span class="bal-chip">Balance: <span id="balDisplay">${Number(store.ccBalance).toLocaleString()}</span> CC</span>
-      </div>
-      <div class="main">
-        <canvas id="plinkoCanvas" width="340" height="380"></canvas>
-        <div class="side">
-          <div class="bet-label">Bet per ball</div>
-          <input class="bet-inp" id="betInput" type="number" min="10" value="100">
-          <button class="drop-btn" id="dropBtn">⬇ Drop Ball</button>
-          <div class="result-card">
-            <div class="res-mult" id="resMult">—</div>
-            <div class="res-cc"   id="resCc"></div>
-          </div>
-          <div class="slots-label">Slots (L→R)</div>
-          <div class="slots-list">
-            ${MULT.map((m,i) => `<div class="srow" id="slot${i}"><span>Slot ${i}</span><span>${m}×</span></div>`).join('')}
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  drawBoard();
-  document.getElementById('backBtn').addEventListener('click', () => window.__navigate('games'));
-  document.getElementById('dropBtn').addEventListener('click', doDrop);
-}
-
-function slotColor(mult) {
-  if (mult >= 100) return '#D4AF37';
-  if (mult >= 6)   return '#a855f7';
-  if (mult >= 1)   return '#3b82f6';
-  return 'rgba(255,255,255,.2)';
-}
-
-function drawBoard(activeBall = null, activeSlot = -1) {
-  const canvas = document.getElementById('plinkoCanvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-
-  const pegR   = 4;
-  const topPad = 28, botPad = 44;
-  const usableH = H - topPad - botPad;
-  const usableW = W - 40;
-
-  // Draw pegs
-  for (let row = 0; row < ROWS; row++) {
-    const pegsInRow = row + 2;
-    const y = topPad + (usableH / ROWS) * row + usableH / ROWS / 2;
-    for (let col = 0; col < pegsInRow; col++) {
-      const x = W / 2 - (usableW / (pegsInRow - 1)) * (pegsInRow - 1) / 2 + (usableW / (pegsInRow - 1)) * col;
-      ctx.beginPath();
-      ctx.arc(x, y, pegR, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,.35)';
-      ctx.fill();
-    }
-  }
-
-  // Draw slot buckets
-  const slotW = W / MULT.length;
-  MULT.forEach((m, i) => {
-    const x = i * slotW;
-    const y = H - botPad;
-    const col = activeSlot === i ? '#fff' : slotColor(m);
-    ctx.fillStyle = activeSlot === i ? col + 'aa' : col + '33';
-    ctx.strokeStyle = col;
-    ctx.lineWidth = activeSlot === i ? 2 : 1;
-    ctx.beginPath();
-    ctx.rect(x + 2, y, slotW - 4, botPad - 4);
-    ctx.fill(); ctx.stroke();
-    ctx.fillStyle = activeSlot === i ? '#fff' : col;
-    ctx.font = `bold ${m >= 10 ? 9 : 10}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(m + '×', x + slotW / 2, y + (botPad - 4) / 2);
+  const shell = gameShell(app, {
+    id: 'plinko', title: 'Plinko',
+    stage: '<canvas class="fill" id="cvP"></canvas><div class="tag" id="plTag">0 balls</div><div class="hint">Every ball costs your bet — drop as many as you like</div>',
   });
 
-  // Animate ball
-  if (activeBall) {
-    ctx.beginPath();
-    ctx.arc(activeBall.x, activeBall.y, 8, 0, Math.PI * 2);
-    ctx.fillStyle = '#D4AF37';
-    ctx.shadowColor = '#D4AF37';
-    ctx.shadowBlur = 12;
-    ctx.fill();
-    ctx.shadowBlur = 0;
+  let bet = 0, n = 0, net = 0, best = 0, balls = [], pops = [], waiting = 0, latest = { nonce: -1, bal: null }, seed = null;
+
+  const hud = () => {
+    const t = $('plTag'); if (!t) return;
+    t.textContent = `${n} ${n === 1 ? 'ball' : 'balls'} · ${net > 0 ? '+' : net < 0 ? '−' : ''}${fmt(Math.abs(net))} CC`;
+    t.style.color = net > 0 ? EM : net < 0 ? 'rgba(239,68,68,.75)' : 'rgba(255,255,255,.26)';
+    const d = $('plDrop'); if (d) d.disabled = Number(store.ccBalance) < bet || waiting + balls.length >= MAX_IN_FLIGHT;
+  };
+  const localBal = (delta) => { store.ccBalance = Number(store.ccBalance) + delta; syncBalance(store.ccBalance); };
+  const settle = () => { if (!waiting && !balls.length && latest.bal !== null) syncBalance(latest.bal); };
+
+  async function drop() {
+    if (Number(store.ccBalance) < bet || waiting + balls.length >= MAX_IN_FLIGHT) return;
+    waiting++; n++; net -= bet; localBal(-bet); hud();
+    try {
+      const r = await api.post('/games/plinko/drop', { amount: bet });
+      waiting--;
+      if (r.nonce > latest.nonce) latest = { nonce: r.nonce, bal: r.cc_balance };
+      seed = r.seed;
+      // offset from centre (in peg gaps) before each row; lands on slot - ROWS/2
+      const base = [], dirs = []; let pos = 0;
+      r.path.forEach((p, i) => { base.push(pos - i / 2); dirs.push(p === 'R' ? 0.5 : -0.5); if (p === 'R') pos++; });
+      balls.push({ t: 0, base, dirs, slot: r.slot, mult: Number(r.multiplier), payout: Number(r.payout) });
+    } catch (e) {
+      waiting--; n--; net += bet; localBal(bet); toast(e.message, 'red');
+    }
+    hud();
   }
-}
-
-async function doDrop() {
-  const bet = Math.floor(Number(document.getElementById('betInput').value));
-  if (bet < 10) { document.getElementById('resMult').textContent = 'Min 10 CC'; return; }
-  const btn = document.getElementById('dropBtn');
-  btn.disabled = true;
-
-  try {
-    const data = await api.post('/games/plinko/drop', { amount: bet });
-    const { slot, path, multiplier, payout, net, cc_balance } = data;
-
-    // Animate the ball following the actual path
-    await animateBall(path, slot);
-
-    updateBalance({ cc_balance });
-    document.getElementById('balDisplay').textContent = Number(cc_balance).toLocaleString();
-    document.getElementById('resMult').textContent = multiplier + '×';
-    document.getElementById('resMult').style.color = slotColor(multiplier);
-    document.getElementById('resCc').textContent = net >= 0 ? `+${net.toLocaleString()} CC` : `${net.toLocaleString()} CC`;
-    document.getElementById('resCc').style.color = net >= 0 ? '#10b981' : '#ef4444';
-
-    // Highlight slot in list
-    document.querySelectorAll('.srow').forEach(r => r.classList.remove('hl'));
-    document.getElementById(`slot${slot}`)?.classList.add('hl');
-
-  } catch (e) {
-    document.getElementById('resMult').textContent = 'Error';
-  } finally {
-    btn.disabled = false;
+  function land(b) {
+    net += b.payout; localBal(b.payout);
+    if (b.mult > best) best = b.mult;
+    pops.push({ i: b.slot, t: 0, m: b.mult });
+    hud(); settle();
   }
-}
-
-async function animateBall(path, finalSlot) {
-  const canvas = document.getElementById('plinkoCanvas');
-  if (!canvas) return;
-  const W = canvas.width, H = canvas.height;
-  const topPad = 28, botPad = 44, usableH = H - topPad - botPad, usableW = W - 40;
-
-  let col = 0;
-  const startX = W / 2;
-  const startY = topPad - 10;
-
-  for (let row = 0; row < path.length; row++) {
-    const dir = path[row] === 'R' ? 1 : 0;
-    col += dir;
-    const pegsInRow = row + 2;
-    const pegX = W / 2 - (usableW / (pegsInRow - 1)) * (pegsInRow - 1) / 2 + (usableW / (pegsInRow - 1)) * col;
-    const pegY = topPad + (usableH / ROWS) * row + usableH / ROWS / 2;
-
-    // Animate to this peg
-    const fromX = row === 0 ? startX : undefined;
-    await tweenBall(fromX !== undefined ? fromX : null, null, pegX, pegY);
+  function done() {
+    const finish = () => {
+      if (waiting || balls.length) return setTimeout(finish, 120);
+      settle();
+      shell.result({
+        net, sub: `${n} ${n === 1 ? 'ball' : 'balls'}${best ? ` · best ${best}×` : ''}`, seed,
+        again: () => start(bet), change,
+      });
+    };
+    $('plDrop').disabled = true; $('plDone').disabled = true;
+    finish();
   }
-  // Final drop to slot
-  const slotW = W / MULT.length;
-  const slotX = finalSlot * slotW + slotW / 2;
-  await tweenBall(null, null, slotX, H - botPad - 4);
-  drawBoard(null, finalSlot);
-  await new Promise(r => setTimeout(r, 600));
-  drawBoard(null, -1);
-}
-
-let ballPos = null;
-async function tweenBall(fromX, fromY, toX, toY, ms = 80) {
-  const canvas = document.getElementById('plinkoCanvas');
-  if (!canvas) return;
-  const start = ballPos || { x: fromX || toX, y: fromY || 20 };
-  const steps = 12;
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    ballPos = { x: start.x + (toX - start.x) * t, y: start.y + (toY - start.y) * t };
-    drawBoard(ballPos);
-    await new Promise(r => setTimeout(r, ms / steps));
+  function start(b) {
+    bet = b; n = 0; net = 0; best = 0; pops = [];
+    shell.actions('<button class="ga" id="plDone">Done</button><button class="ga ga-em" id="plDrop">Drop</button>');
+    $('plDrop').onclick = drop; $('plDone').onclick = done;
+    shell.show('scPlay'); hud();
   }
-  ballPos = { x: toX, y: toY };
+  const change = () => shell.bet({ onPlace: (b) => start(b) });
+
+  const cv = $('cvP');
+  loop((dt) => {
+    const f = fitCanvas(cv); if (!f) return;
+    const { ctx: c, W, H } = f;
+    const gy = (H * 0.66) / ROWS, gx = Math.min(W * 0.068, gy * 1.08), top = H * 0.08, cx = W / 2;
+    c.fillStyle = w(0.2);
+    for (let r = 0; r < ROWS; r++) for (let i = 0; i <= r + 2; i++) {
+      c.beginPath(); c.arc(cx + (i - (r + 2) / 2) * gx, top + r * gy, Math.max(1.8, gy * 0.1), 0, 7); c.fill();
+    }
+    const sy = top + ROWS * gy + gy * 0.2, sw = gx * 0.9, sh = Math.min(H * 0.1, 30);
+    pops.forEach((p) => { p.t += dt; }); pops = pops.filter((p) => p.t < 1.1);
+    for (let i = 0; i <= ROWS; i++) {
+      const x = cx + (i - ROWS / 2) * gx - sw / 2, m = MULT[i], hot = m >= 6;
+      const p = pops.find((q) => q.i === i), glow = p ? Math.max(0, 1 - p.t / 1.1) : 0;
+      c.fillStyle = hot ? gd(0.16 + glow * 0.5) : m >= 1 ? em(0.09 + glow * 0.45) : w(0.05 + glow * 0.3);
+      rr(c, x, sy, sw, sh, 4); c.fill();
+      c.fillStyle = glow > 0.4 ? '#0a0a0a' : hot ? gd(0.9) : m >= 1 ? em(0.65) : w(0.4);
+      c.font = `700 ${Math.min(sh * 0.36, sw * 0.34, 12)}px ${PF}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(`${m}×`, x + sw / 2, sy + sh / 2);
+      if (p && glow > 0) {
+        c.globalAlpha = glow; c.font = `700 ${Math.min(H * 0.045, 15)}px ${PF}`;
+        c.fillStyle = hot ? GOLD : p.m >= 1 ? EM : 'rgba(239,68,68,.8)';
+        c.fillText(`${p.m}×`, x + sw / 2, sy - 13 - (1 - glow) * 18); c.globalAlpha = 1;
+      }
+    }
+    for (let k = balls.length - 1; k >= 0; k--) {
+      const b = balls[k];
+      b.t += dt * 7.5;
+      const r = Math.floor(b.t);
+      if (r >= ROWS) { balls.splice(k, 1); land(b); continue; }
+      const fr = b.t - r, off = b.base[r] + b.dirs[r] * fr;
+      const x = cx + off * gx, y = top + (b.t - 1) * gy - Math.abs(Math.sin(fr * Math.PI)) * gy * 0.18;
+      if (y < -gy) continue;
+      c.beginPath(); c.arc(x, y, Math.max(3.5, gy * 0.2), 0, 7); c.fillStyle = GOLD; c.fill();
+      c.beginPath(); c.arc(x, y, Math.max(8, gy * 0.42), 0, 7); c.fillStyle = gd(0.14); c.fill();
+    }
+  });
+
+  change();
 }

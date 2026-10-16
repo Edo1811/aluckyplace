@@ -1,162 +1,113 @@
 import { api } from '../api.js';
-import { store, updateBalance } from '../store.js';
+import { $, fmt, toast, later } from '../ui/core.js';
+import { gameShell, fitCanvas, loop, syncBalance, eOut } from '../games/shell.js';
+import { rr, w, em, gd, cl, EM, GOLD, PF, pullGesture } from '../games/draw.js';
 
-const SYMBOLS = ['💎','⭐','💵','🔔','🍒'];
-const NAMES   = ['Diamond','Star','Dollar','Bell','Cherry'];
-const COLORS  = ['#10b981','#D4AF37','#3b82f6','#a855f7','#ef4444'];
+// Server symbols → reel glyphs. Pays: 3×Diamond 100, Star 40, Dollar 15, Bell 8, Cherry 3; 2+ Cherry 2.
+const SYMS = ['Diamond', 'Star', 'Dollar', 'Bell', 'Cherry'];
+const GLYPH = { Diamond: '◆', Star: '★', Dollar: '$', Bell: '🔔', Cherry: '🍒' };
+const N = SYMS.length;
 
 export function renderSlots(app) {
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .sp{display:flex;flex-direction:column;height:100vh;background:radial-gradient(ellipse at 50% 40%,#150a2a 0%,#050505 65%);font-family:'Playfair Display',Georgia,serif;color:#fff}
-      .topbar{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
-      .back{padding:6px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:8px;color:rgba(255,255,255,.5);font-size:12px;cursor:pointer;font-family:'Playfair Display',Georgia,serif}
-      .game-title{font-size:16px;font-weight:700}
-      .bal-chip{margin-left:auto;font-size:12px;color:rgba(255,255,255,.4)}
-      .bal-chip span{color:#10b981;font-weight:700}
-      .slot-area{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px}
-      .machine{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:24px;display:flex;flex-direction:column;align-items:center;gap:16px}
-      .reels{display:flex;gap:12px}
-      .reel-wrap{width:88px;height:88px;border-radius:12px;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1);overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center}
-      .reel-win{position:absolute;inset:0;border-radius:12px;border:2px solid transparent;transition:border-color .3s,box-shadow .3s}
-      .reel-sym{font-size:44px;transition:transform .1s;user-select:none}
-      .payline{height:2px;background:rgba(212,175,55,.3);border-radius:1px;width:100%;margin:-4px 0}
-      .result-msg{font-size:22px;font-weight:700;min-height:32px;text-align:center;transition:color .3s}
-      .controls{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:320px}
-      .bet-row{display:flex;gap:8px;align-items:center}
-      .bet-label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-      .bet-inp{width:110px;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-size:15px;font-weight:700;font-family:'Playfair Display',Georgia,serif;outline:none;text-align:center}
-      .bet-inp:focus{border-color:rgba(168,85,247,.4)}
-      .spin-btn{padding:13px 48px;background:linear-gradient(135deg,#a855f7,#7c3aed);border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer;transition:all .15s;box-shadow:0 4px 20px rgba(168,85,247,.3)}
-      .spin-btn:hover{transform:translateY(-1px);box-shadow:0 6px 24px rgba(168,85,247,.4)}
-      .spin-btn:disabled{background:rgba(255,255,255,.08);color:rgba(255,255,255,.25);cursor:not-allowed;transform:none;box-shadow:none}
-      .paytable{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;max-width:340px}
-      .prow{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:9px;padding:8px 10px;text-align:center}
-      .prow-sym{font-size:18px;margin-bottom:3px}
-      .prow-mult{font-size:13px;font-weight:700;color:#D4AF37}
-      .prow-name{font-size:9px;color:rgba(255,255,255,.25);letter-spacing:.06em}
-    </style>
-    <div class="sp">
-      <div class="topbar">
-        <button class="back" id="backBtn">← Games</button>
-        <span class="game-title">Slots</span>
-        <span class="bal-chip">Balance: <span id="balDisplay">${Number(store.ccBalance).toLocaleString()}</span> CC</span>
-      </div>
-      <div class="slot-area">
-        <div class="machine">
-          <div class="reels" id="reels">
-            ${[0,1,2].map(i => `
-              <div class="reel-wrap" id="reel${i}">
-                <div class="reel-win" id="reelWin${i}"></div>
-                <div class="reel-sym" id="reelSym${i}">🍒</div>
-              </div>`).join('')}
-          </div>
-          <div class="payline"></div>
-          <div class="result-msg" id="resultMsg">—</div>
-        </div>
-        <div class="controls">
-          <div class="bet-row">
-            <span class="bet-label">Bet</span>
-            <input class="bet-inp" id="betInput" type="number" min="10" value="100">
-          </div>
-          <button class="spin-btn" id="spinBtn">🎰 Spin</button>
-        </div>
-        <div class="paytable">
-          <div class="prow"><div class="prow-sym">💎💎💎</div><div class="prow-mult">100×</div><div class="prow-name">JACKPOT</div></div>
-          <div class="prow"><div class="prow-sym">⭐⭐⭐</div><div class="prow-mult">40×</div><div class="prow-name">STAR</div></div>
-          <div class="prow"><div class="prow-sym">💵💵💵</div><div class="prow-mult">15×</div><div class="prow-name">DOLLAR</div></div>
-          <div class="prow"><div class="prow-sym">🔔🔔🔔</div><div class="prow-mult">8×</div><div class="prow-name">BELL</div></div>
-          <div class="prow"><div class="prow-sym">🍒🍒🍒</div><div class="prow-mult">3×</div><div class="prow-name">CHERRY</div></div>
-          <div class="prow"><div class="prow-sym">🍒🍒</div><div class="prow-mult">2×</div><div class="prow-name">ANY TWO</div></div>
-        </div>
-      </div>
-    </div>
-  `;
+  const shell = gameShell(app, {
+    id: 'slots', title: 'Slots',
+    stage: `<canvas class="fill" id="cvS"></canvas>
+      <div class="lever" id="slLev"><div class="lknob" id="slKnob"></div></div>
+      <div class="hint" id="slTag">Pull the lever · tap a reel to slam it to a stop</div>`,
+  });
 
-  document.getElementById('backBtn').addEventListener('click', () => window.__navigate('games'));
-  document.getElementById('spinBtn').addEventListener('click', doSpin);
-}
+  let bet = 0, spin = false, res = null, geo = null, ready = false;
+  const pos = [0, 1, 2], from = [0, 1, 2], to = [0, 1, 2], el = [0, 0, 0], dur = [1, 1, 1], tgt = [0, 0, 0];
 
-async function doSpin() {
-  const bet = Math.floor(Number(document.getElementById('betInput').value));
-  if (bet < 10) return setMsg('Minimum bet is 10 CC', '#ef4444');
+  const lev = $('slLev'), knob = $('slKnob');
+  pullGesture(lev, 118, {
+    onStart: () => ready && !spin,
+    onMove: (p) => { knob.style.top = `${5 + p}px`; },
+    onRelease: (p) => {
+      knob.style.transition = 'top .4s cubic-bezier(.2,1.4,.4,1)'; knob.style.top = '5px';
+      later(420, () => { knob.style.transition = ''; });
+      if (p / 118 > 0.12) pull(p / 118);
+    },
+  });
+  const cv = $('cvS'); cv.style.touchAction = 'none';
+  cv.addEventListener('pointerdown', (e) => {
+    if (!spin || !geo) return;
+    const r = cv.getBoundingClientRect(), i = Math.floor((e.clientX - r.left - geo.x0) / (geo.rw + geo.gap));
+    if (i >= 0 && i < 3) slam(i);
+  });
 
-  const btn = document.getElementById('spinBtn');
-  btn.disabled = true;
-  setMsg('Spinning…', 'rgba(255,255,255,.4)');
-
-  // Animate reels spinning
-  animateReels(true);
-
-  try {
-    const data = await api.post('/games/slots/spin', { amount: bet });
-    await new Promise(r => setTimeout(r, 600)); // let animation run
-
-    // Stop reels on result
-    animateReels(false);
-    await showResult(data);
-
-    updateBalance({ cc_balance: data.cc_balance });
-    document.getElementById('balDisplay').textContent = Number(data.cc_balance).toLocaleString();
-
-  } catch (e) {
-    animateReels(false);
-    setMsg(e.message || 'Error', '#ef4444');
-  } finally {
-    btn.disabled = false;
+  async function pull(power) {
+    ready = false;
+    const tag = $('slTag'); tag.textContent = 'Spinning…'; tag.style.color = ''; tag.style.fontSize = '';
+    try { res = await api.post('/games/slots/spin', { amount: bet }); } catch (e) { toast(e.message, 'red'); ready = true; tag.textContent = 'Pull the lever'; return; }
+    syncBalance(Number(res.cc_balance) - Number(res.payout)); // show the stake leaving now, the win when reels land
+    for (let i = 0; i < 3; i++) {
+      tgt[i] = SYMS.indexOf(res.reels[i]);
+      from[i] = pos[i];
+      const base = Math.floor(from[i]) + Math.round(10 + power * 34) + i * 7;
+      to[i] = base + (((tgt[i] - base) % N) + N) % N;
+      el[i] = 0; dur[i] = 0.9 + power * 1.9 + i * 0.42 + (res.nearMiss && i === 2 ? 0.9 : 0);
+    }
+    spin = true;
+    tag.textContent = 'Tap a reel to slam it';
   }
-}
-
-let spinIntervals = [];
-function animateReels(spinning) {
-  spinIntervals.forEach(clearInterval);
-  spinIntervals = [];
-  if (spinning) {
-    [0,1,2].forEach(i => {
-      spinIntervals.push(setInterval(() => {
-        document.getElementById(`reelSym${i}`).textContent = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-      }, 80));
-    });
+  function slam(i) {
+    if (el[i] >= dur[i]) return;
+    let e = Math.ceil(pos[i] + 1.2); e += (((tgt[i] - e) % N) + N) % N;
+    from[i] = pos[i]; to[i] = e; el[i] = 0; dur[i] = 0.34;
   }
-}
-
-async function showResult(data) {
-  const { reels, multiplier, nearMiss, payout, net } = data;
-  const symMap = { Diamond:'💎', Star:'⭐', Dollar:'💵', Bell:'🔔', Cherry:'🍒' };
-
-  // Set final symbols with staggered delay
-  for (let i = 0; i < 3; i++) {
-    await new Promise(r => setTimeout(r, 120 * i));
-    document.getElementById(`reelSym${i}`).textContent = symMap[reels[i]] || reels[i];
+  function landed() {
+    syncBalance(res.cc_balance);
+    const m = Number(res.multiplier), tag = $('slTag');
+    tag.textContent = m ? `${res.reels.map((s) => GLYPH[s]).join(' ')} · ${m}× · +${fmt(res.payout)} CC` : res.nearMiss ? 'So close' : 'No match this time';
+    tag.style.color = m ? (m >= 40 ? GOLD : EM) : 'rgba(255,255,255,.3)'; tag.style.fontSize = '13px';
+    const r = res;
+    later(1600, () => shell.result({
+      net: Number(r.net), sub: m ? `${m}× on ${r.reels.map((s) => GLYPH[s]).join(' ')}` : 'No match', seed: r.seed,
+      again: () => start(bet), change,
+    }));
   }
-
-  await new Promise(r => setTimeout(r, 100));
-
-  if (multiplier > 0) {
-    // Flash winning reels
-    reels.forEach((_, i) => {
-      const win = document.getElementById(`reelWin${i}`);
-      const col = multiplier >= 40 ? '#D4AF37' : '#10b981';
-      win.style.borderColor = col;
-      win.style.boxShadow = `0 0 16px ${col}66`;
-    });
-    setMsg(multiplier >= 100 ? `🎰 JACKPOT! +${payout.toLocaleString()} CC` : `+${payout.toLocaleString()} CC (${multiplier}×)`,
-      multiplier >= 40 ? '#D4AF37' : '#10b981');
-    setTimeout(() => reels.forEach((_, i) => {
-      const w = document.getElementById(`reelWin${i}`);
-      w.style.borderColor = 'transparent'; w.style.boxShadow = 'none';
-    }), 2000);
-  } else if (nearMiss) {
-    setMsg('So close… 😬', 'rgba(255,255,255,.5)');
-  } else {
-    setMsg(`-${Math.abs(net).toLocaleString()} CC`, '#ef4444');
+  function start(b) {
+    bet = b; res = null; spin = false; ready = true;
+    const tag = $('slTag'); tag.textContent = 'Pull the lever · tap a reel to slam it to a stop'; tag.style.color = ''; tag.style.fontSize = '';
+    shell.actions(''); shell.show('scPlay');
   }
-}
+  const change = () => shell.bet({ onPlace: start });
 
-function setMsg(msg, color = '#fff') {
-  const el = document.getElementById('resultMsg');
-  if (el) { el.textContent = msg; el.style.color = color; }
+  loop((dt) => {
+    const f = fitCanvas(cv); if (!f) return;
+    const { ctx: c, W, H } = f;
+    const rw = Math.min(W * 0.22, H * 0.3), rh = rw * 1.9, gap = rw * 0.16, sh = rh / 3;
+    const x0 = W / 2 - (rw * 3 + gap * 2) / 2 - W * 0.05, y0 = H * 0.5 - rh / 2;
+    geo = { x0, rw, gap };
+    if (spin) {
+      let all = true;
+      for (let i = 0; i < 3; i++) {
+        el[i] += dt; const k = cl(el[i] / dur[i], 0, 1);
+        pos[i] = from[i] + eOut(k) * (to[i] - from[i]);
+        if (k < 1) all = false;
+      }
+      if (all) { spin = false; landed(); }
+    }
+    for (let i = 0; i < 3; i++) {
+      const x = x0 + i * (rw + gap), p = pos[i], fl = Math.floor(p), fr = p - fl;
+      const live = spin && el[i] < dur[i];
+      c.fillStyle = w(0.05); rr(c, x, y0, rw, rh, rw * 0.12); c.fill();
+      c.save(); rr(c, x, y0, rw, rh, rw * 0.12); c.clip();
+      for (let r = -2; r <= 2; r++) {
+        const y = y0 + rh / 2 + r * sh - fr * sh, s = SYMS[((fl + r) % N + N) % N];
+        c.fillStyle = s === 'Diamond' ? EM : s === 'Star' ? GOLD : w(0.72);
+        c.font = `700 ${sh * 0.44}px ${PF}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.fillText(GLYPH[s], x + rw / 2, y);
+      }
+      c.restore();
+      c.strokeStyle = live ? em(0.35) : w(0.1); c.lineWidth = live ? 1.6 : 1; rr(c, x, y0, rw, rh, rw * 0.12); c.stroke();
+    }
+    const hit = !spin && res && Number(res.multiplier) > 0;
+    c.strokeStyle = hit ? em(0.7) : em(0.16); c.lineWidth = hit ? 2 : 1;
+    c.beginPath(); c.moveTo(x0 - 9, H * 0.5); c.lineTo(x0 + rw * 3 + gap * 2 + 9, H * 0.5); c.stroke();
+    if (hit) { const a = 0.09 + 0.06 * Math.sin(performance.now() / 150); c.fillStyle = Number(res.multiplier) >= 40 ? gd(a) : em(a); c.fillRect(0, 0, W, H); }
+  });
+
+  change();
 }

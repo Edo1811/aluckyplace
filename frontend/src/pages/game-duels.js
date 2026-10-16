@@ -1,166 +1,84 @@
 import socket from '../socket.js';
-import { store, updateBalance } from '../store.js';
+import { $, later } from '../ui/core.js';
+import { on } from '../games/shell.js';
+import { pvpShell } from '../games/pvp.js';
 
-export function renderDuels(app, matchData) {
-  const { matchId, pot } = matchData;
-  let myHp = 3, oppHp = 3, myMove = null, turnActive = true;
+// 3 HP each. Both pick at once; 10s per round — no pick means defend.
+const MAX = 3;
+const LABEL = { attack: 'Attack', defend: 'Defend', special: 'Special' };
+const STYLE = `
+.hearts{display:flex;gap:4px;justify-content:center;margin-bottom:8px;font-size:15px}
+.hearts i{font-style:normal;transition:opacity .3s,transform .3s}
+.hearts i.gone{opacity:.15;transform:scale(.7)}
+.dmove{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.35);min-height:14px;margin-top:6px}
+.duelpick{display:flex;gap:8px;width:100%}
+.duelpick .ga.on{outline:2px solid var(--em)}
+`;
 
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .dp{display:flex;flex-direction:column;height:100vh;background:radial-gradient(ellipse at 50% 40%,#1a0814 0%,#050505 70%);font-family:'Playfair Display',Georgia,serif;color:#fff;align-items:center;justify-content:center;gap:20px;text-align:center;padding:28px}
-      .game-lbl{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-      .pot-display{font-size:14px;color:rgba(255,255,255,.4)}
-      .pot-display span{color:#D4AF37;font-weight:700}
-      .fighters{display:flex;gap:28px;align-items:center}
-      .fighter{display:flex;flex-direction:column;align-items:center;gap:8px}
-      .f-name{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.35)}
-      .f-hearts{display:flex;gap:6px;font-size:24px;min-height:34px}
-      .vs-big{font-size:22px;color:rgba(255,255,255,.2);font-weight:700}
-      .round-lbl{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.25)}
-      .reveal-area{display:flex;gap:20px;align-items:center;min-height:70px}
-      .move-icon{font-size:44px;min-width:60px}
-      .status{font-size:15px;color:rgba(255,255,255,.5);font-style:italic;min-height:22px}
-      .moves-row{display:flex;gap:12px}
-      .move-btn{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 18px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);cursor:pointer;transition:all .15s;font-family:'Playfair Display',Georgia,serif}
-      .move-btn:hover{background:rgba(255,255,255,.12);transform:translateY(-2px)}
-      .move-btn.selected{border-color:#10b981;background:rgba(16,185,129,.12)}
-      .move-btn:disabled{opacity:.3;cursor:not-allowed;transform:none}
-      .move-btn .em{font-size:28px}
-      .move-btn .lbl{font-size:11px;color:rgba(255,255,255,.5);letter-spacing:.06em;text-transform:uppercase}
-      .result-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);align-items:center;justify-content:center;flex-direction:column;gap:14px;z-index:100}
-      .result-overlay.show{display:flex}
-      .res-title{font-size:42px;font-weight:700}
-      .res-sub{font-size:14px;color:rgba(255,255,255,.4);font-style:italic}
-      .res-btn{padding:12px 36px;background:#10b981;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer}
-      .timer-bar{width:200px;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden}
-      .timer-fill{height:100%;background:#10b981;border-radius:2px;transition:width 1s linear}
-    </style>
-    <div class="dp">
-      <div class="game-lbl">Duels · PvP</div>
-      <div class="pot-display">Pot: <span>${pot.toLocaleString()} CC</span></div>
-      <div class="fighters">
-        <div class="fighter">
-          <div class="f-name">You</div>
-          <div class="f-hearts" id="myHearts">❤️❤️❤️</div>
-        </div>
-        <div class="vs-big">⚔️</div>
-        <div class="fighter">
-          <div class="f-name">Opponent</div>
-          <div class="f-hearts" id="oppHearts">❤️❤️❤️</div>
-        </div>
+export function renderDuels(app, md) {
+  const p = pvpShell(app, md, {
+    game: 'duels', title: 'Duels', css: STYLE,
+    stage: `<div class="pad" style="position:relative">
+      <div class="hpwrap">
+        <div class="fighter me"><div class="hearts" id="hpMe"></div><div class="fbody" id="fbMe"></div><div class="handlab" style="margin-top:10px">You</div><div class="dmove" id="mvMe"></div></div>
+        <div class="fighter"><div class="hearts" id="hpOpp"></div><div class="fbody" id="fbOpp"></div><div class="handlab" id="duOppN" style="margin-top:10px"></div><div class="dmove" id="mvOpp"></div></div>
       </div>
-      <div class="round-lbl" id="roundLbl">Round 1</div>
-      <div class="reveal-area">
-        <div class="move-icon" id="myMoveIcon">❓</div>
-        <div style="font-size:18px;color:rgba(255,255,255,.2)">VS</div>
-        <div class="move-icon" id="oppMoveIcon">❓</div>
-      </div>
-      <div class="status" id="status">Choose your move!</div>
-      <div class="timer-bar"><div class="timer-fill" id="timerFill" style="width:100%"></div></div>
-      <div class="moves-row" id="movesRow">
-        <button class="move-btn" data-move="attack"><span class="em">⚔️</span><span class="lbl">Attack</span></button>
-        <button class="move-btn" data-move="defend"><span class="em">🛡️</span><span class="lbl">Defend</span></button>
-        <button class="move-btn" data-move="special"><span class="em">✨</span><span class="lbl">Special</span></button>
-      </div>
-    </div>
-    <div class="result-overlay" id="resultOverlay">
-      <div class="res-title" id="resTitle"></div>
-      <div class="res-sub"   id="resSub">Match over</div>
-      <button class="res-btn" onclick="window.__navigate('games')">Back to Games</button>
-    </div>
-  `;
+      <div class="logline" id="duLog">Round 1 · pick your move</div>
+      <div class="ghint">Defend blocks Attack · Special breaks Defend · Attack beats Special</div>
+    </div>`,
+  });
+  if (!p) return;
+  $('duOppN').textContent = md.opponent || 'Opponent';
 
-  const MOVE_EMOJI = { attack:'⚔️', defend:'🛡️', special:'✨' };
-  let timerInterval = null;
-  let round = 1;
+  let picked = null, result = null, hpMe = MAX, hpOpp = MAX, over = false;
+  const hearts = (id, hp) => { $(id).innerHTML = Array.from({ length: MAX }, (_, i) => `<i class="${i < hp ? '' : 'gone'}">♥</i>`).join(''); };
+  const bars = () => { hearts('hpMe', hpMe); hearts('hpOpp', hpOpp); };
 
-  function renderHearts(hp) {
-    return '❤️'.repeat(Math.max(0,hp)) + '🖤'.repeat(Math.max(0, 3 - hp));
+  function buttons() {
+    const a = p.shell.actions(`<div class="duelpick"><button class="ga ga-red" data-m="attack">Attack</button><button class="ga" data-m="defend">Defend</button><button class="ga ga-gold" data-m="special">Special</button></div>`);
+    a.querySelectorAll('[data-m]').forEach((b) => b.addEventListener('click', () => {
+      if (picked || over) return;
+      picked = b.dataset.m; p.move(picked);
+      a.querySelectorAll('[data-m]').forEach((x) => { x.disabled = x !== b; x.classList.toggle('on', x === b); });
+      $('mvMe').textContent = LABEL[picked]; $('duLog').textContent = 'Locked in · waiting';
+    }));
+  }
+  function hit(who) {
+    const el = $(who === 'me' ? 'fbMe' : 'fbOpp'); el.classList.add('hurt'); later(220, () => el.classList.remove('hurt'));
+    const d = document.createElement('div'); d.className = 'dmg'; d.textContent = '−1';
+    d.style.left = who === 'me' ? '26%' : '70%'; d.style.top = '40%';
+    $('gstage').appendChild(d); later(900, () => d.remove());
+  }
+  function newRound(n, ms) {
+    picked = null; $('mvMe').textContent = ''; $('mvOpp').textContent = '';
+    $('duLog').textContent = `Round ${n} · pick your move`;
+    buttons(); p.timer(ms);
   }
 
-  function startTimer() {
-    let t = 10;
-    document.getElementById('timerFill').style.width = '100%';
-    clearInterval(timerInterval);
-    timerInterval = setInterval(() => {
-      t--;
-      const el = document.getElementById('timerFill');
-      if (el) el.style.width = (t / 10 * 100) + '%';
-      if (t <= 0) { clearInterval(timerInterval); if (!myMove) autoDefend(); }
-    }, 1000);
-  }
-
-  function autoDefend() {
-    myMove = 'defend';
-    socket.emit('pvp:move', { match_id: matchId, move: 'defend' });
-    document.querySelectorAll('.move-btn').forEach(b => { b.disabled = true; b.classList.toggle('selected', b.dataset.move === 'defend'); });
-    document.getElementById('myMoveIcon').textContent = '🛡️';
-    document.getElementById('status').textContent = 'Auto-defended (time ran out)';
-  }
-
-  startTimer();
-
-  document.getElementById('movesRow').addEventListener('click', e => {
-    const btn = e.target.closest('.move-btn');
-    if (!btn || myMove || !turnActive) return;
-    myMove = btn.dataset.move;
-    clearInterval(timerInterval);
-    document.querySelectorAll('.move-btn').forEach(b => { b.disabled = true; b.classList.toggle('selected', b.dataset.move === myMove); });
-    document.getElementById('myMoveIcon').textContent = MOVE_EMOJI[myMove];
-    document.getElementById('status').textContent = 'Waiting for opponent…';
-    socket.emit('pvp:move', { match_id: matchId, move: myMove });
+  on(socket, {
+    'pvp:opponent_moved': () => { $('mvOpp').textContent = 'Ready'; },
+    'pvp:round_result': ({ your_move, opp_move, your_hp, opp_hp, round }) => {
+      p.timer(0); p.shell.actions('');
+      $('mvMe').textContent = LABEL[your_move]; $('mvOpp').textContent = LABEL[opp_move];
+      const lostMe = hpMe - your_hp, lostOpp = hpOpp - opp_hp;
+      if (your_move !== 'defend') $('fbMe').classList.add('atkR');
+      if (opp_move !== 'defend') $('fbOpp').classList.add('atkL');
+      later(220, () => {
+        $('fbMe').classList.remove('atkR'); $('fbOpp').classList.remove('atkL');
+        hpMe = your_hp; hpOpp = opp_hp;
+        if (lostOpp > 0) hit('opp'); if (lostMe > 0) hit('me');
+        bars();
+        const auto = picked ? '' : ' (auto-defended)';
+        if (hpMe <= 0 && hpOpp <= 0) { $('duLog').textContent = 'Double knockout — both back to full'; later(900, () => { hpMe = MAX; hpOpp = MAX; bars(); }); }
+        else $('duLog').textContent = (lostOpp && lostMe ? 'You traded blows' : lostOpp ? 'Clean hit' : lostMe ? 'You got hit' : 'Nothing landed') + auto;
+        if (hpMe <= 0 !== hpOpp <= 0) { over = true; if (result) end(); return; }
+        later(1200, () => newRound(round + 1, 8600)); // server's 10s clock started already (1.5s on a double KO)
+      });
+    },
+    'pvp:result': (r) => { result = r; if (over) end(); },
   });
+  const end = () => later(1100, () => p.finish({ won: result.you_won, seed: result.seed, sub: result.you_won ? `${md.opponent} is down` : 'You were knocked out' }));
 
-  socket.on('pvp:round_result', ({ your_move, opp_move, your_hp, opp_hp, round: r }) => {
-    myHp = your_hp; oppHp = opp_hp;
-    document.getElementById('myMoveIcon').textContent  = MOVE_EMOJI[your_move] || '❓';
-    document.getElementById('oppMoveIcon').textContent = MOVE_EMOJI[opp_move]  || '❓';
-    document.getElementById('myHearts').textContent    = renderHearts(myHp);
-    document.getElementById('oppHearts').textContent   = renderHearts(oppHp);
-    document.getElementById('roundLbl').textContent    = `Round ${r}`;
-
-    let resultText = '';
-    if (your_move === 'attack' && opp_move === 'attack') resultText = 'Both attacked — both took damage!';
-    else if (your_move === opp_move) resultText = 'Same move — nothing happened.';
-    else resultText = 'Round resolved!';
-    document.getElementById('status').textContent = resultText;
-
-    if (myHp <= 0 || oppHp <= 0) return; // pvp:result coming
-
-    setTimeout(() => {
-      myMove = null;
-      document.getElementById('myMoveIcon').textContent  = '❓';
-      document.getElementById('oppMoveIcon').textContent = '❓';
-      document.getElementById('status').textContent = 'Choose your move!';
-      document.querySelectorAll('.move-btn').forEach(b => { b.disabled = false; b.classList.remove('selected'); });
-      startTimer();
-    }, 1500);
-  });
-
-  socket.on('pvp:result', ({ you_won }) => {
-    clearInterval(timerInterval);
-    const overlay = document.getElementById('resultOverlay');
-    const title   = document.getElementById('resTitle');
-    title.textContent = you_won ? '🏆 Victory!' : '💀 Defeated';
-    title.style.color = you_won ? '#10b981' : '#ef4444';
-    overlay.classList.add('show');
-    socket.off('pvp:round_result');
-    socket.off('pvp:result');
-    socket.off('pvp:auto_win');
-  });
-
-  socket.on('pvp:auto_win', () => {
-    clearInterval(timerInterval);
-    const overlay = document.getElementById('resultOverlay');
-    document.getElementById('resTitle').textContent = '🏆 Victory!';
-    document.getElementById('resTitle').style.color = '#10b981';
-    document.getElementById('resSub').textContent   = 'Opponent disconnected.';
-    overlay.classList.add('show');
-    socket.off('pvp:round_result');
-    socket.off('pvp:result');
-    socket.off('pvp:auto_win');
-  });
+  bars();
+  newRound(1, 10000);
 }

@@ -1,129 +1,71 @@
 import socket from '../socket.js';
-import { store, updateBalance } from '../store.js';
+import { $, later } from '../ui/core.js';
+import { on } from '../games/shell.js';
+import { pvpShell } from '../games/pvp.js';
 
-const MOVES   = ['rock','paper','scissors'];
-const EMOJI   = { rock:'🪨', paper:'📄', scissors:'✂️' };
-const BEATS   = { rock:'scissors', scissors:'paper', paper:'rock' };
+// First to 2 round wins. 5s per round — no pick means rock.
+const ICON = { rock: '✊', paper: '✋', scissors: '✌️' };
+const STYLE = `
+.rpsslot.shake{animation:rpsShake .32s ease-in-out 3}
+@keyframes rpsShake{50%{transform:translateY(-10px)}}
+.rpspick{display:flex;gap:8px;width:100%}
+.rpspick .ga{font-size:22px;padding:12px 0}
+.rpspick .ga.on{background:rgba(16,185,129,.16);border-color:rgba(16,185,129,.45)}
+.rpsscore{text-align:center;font-size:30px;font-weight:700;letter-spacing:.08em}
+`;
 
-export function renderRps(app, matchData) {
-  const { matchId, pot } = matchData;
-  let scores = {};
-  let myMove = null;
-  let round  = 1;
-
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .rp{display:flex;flex-direction:column;height:100vh;background:#050505;font-family:'Playfair Display',Georgia,serif;color:#fff;align-items:center;justify-content:center;gap:20px;text-align:center;padding:28px}
-      .game-lbl{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-      .pot-display{font-size:14px;color:rgba(255,255,255,.4)}
-      .pot-display span{color:#D4AF37;font-weight:700}
-      .score-row{display:flex;gap:20px;align-items:center}
-      .score-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px 24px;text-align:center}
-      .score-n{font-size:32px;font-weight:700}
-      .score-l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3);margin-top:4px}
-      .vs-sep{font-size:18px;color:rgba(255,255,255,.2);font-weight:700}
-      .reveal-area{display:flex;gap:32px;align-items:center;min-height:100px}
-      .move-display{font-size:64px;min-width:80px}
-      .round-lbl{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.25)}
-      .status{font-size:16px;color:rgba(255,255,255,.5);font-style:italic;min-height:24px}
-      .moves-row{display:flex;gap:12px}
-      .move-btn{width:80px;height:80px;border-radius:16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);font-size:36px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center}
-      .move-btn:hover{background:rgba(255,255,255,.12);transform:scale(1.06)}
-      .move-btn.selected{border-color:#10b981;background:rgba(16,185,129,.12)}
-      .move-btn:disabled{opacity:.3;cursor:not-allowed;transform:none}
-      .result-big{font-size:36px;font-weight:700;min-height:44px}
-      .result-big.win{color:#10b981}
-      .result-big.loss{color:#ef4444}
-      .result-big.tie{color:#D4AF37}
-      .nav-btn{padding:12px 36px;background:#10b981;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer;display:none}
-    </style>
-    <div class="rp">
-      <div class="game-lbl">Rock Paper Scissors · PvP</div>
-      <div class="pot-display">Pot: <span>${pot.toLocaleString()} CC</span></div>
-      <div class="score-row">
-        <div class="score-card"><div class="score-n" id="myScore" style="color:#10b981">0</div><div class="score-l">You</div></div>
-        <div class="vs-sep">—</div>
-        <div class="score-card"><div class="score-n" id="oppScore" style="color:#ef4444">0</div><div class="score-l">Opponent</div></div>
-      </div>
-      <div class="round-lbl" id="roundLbl">Round 1 · Best of 3</div>
-      <div class="reveal-area">
-        <div class="move-display" id="myMoveDisplay">❓</div>
-        <div style="font-size:18px;color:rgba(255,255,255,.2)">VS</div>
-        <div class="move-display" id="oppMoveDisplay">❓</div>
-      </div>
-      <div class="status" id="status">Pick your move!</div>
-      <div class="moves-row" id="movesRow">
-        ${MOVES.map(m => `<button class="move-btn" data-move="${m}" title="${m}">${EMOJI[m]}</button>`).join('')}
-      </div>
-      <div class="result-big" id="resultBig"></div>
-      <button class="nav-btn" id="navBtn" onclick="window.__navigate('games')">Back to Games</button>
-    </div>
-  `;
-
-  const myId = store.user?.userId;
-
-  document.getElementById('movesRow').addEventListener('click', e => {
-    const btn = e.target.closest('.move-btn');
-    if (!btn || myMove) return;
-    myMove = btn.dataset.move;
-    document.querySelectorAll('.move-btn').forEach(b => { b.disabled = true; b.classList.toggle('selected', b.dataset.move === myMove); });
-    document.getElementById('myMoveDisplay').textContent = EMOJI[myMove];
-    document.getElementById('status').textContent = 'Waiting for opponent…';
-    socket.emit('pvp:move', { match_id: matchId, move: myMove });
+export function renderRps(app, md) {
+  const p = pvpShell(app, md, {
+    game: 'rps', title: 'Rock Paper Scissors', css: STYLE,
+    stage: `<div class="pad">
+      <div class="rpsscore" id="rpScore">0 – 0</div>
+      <div class="pips" id="rpPips"></div>
+      <div class="rpsrow"><div class="rpsslot" id="rpMe">?</div><div class="muted">vs</div><div class="rpsslot" id="rpOpp">?</div></div>
+      <div class="logline" id="rpLog">Round 1 · pick your move</div>
+    </div>`,
   });
+  if (!p) return;
 
-  socket.on('pvp:round_result', ({ your_move, opp_move, result, scores: sc, round: r }) => {
-    document.getElementById('myMoveDisplay').textContent  = EMOJI[your_move] || '❓';
-    document.getElementById('oppMoveDisplay').textContent = EMOJI[opp_move]  || '❓';
+  let me = 0, opp = 0, picked = null, locked = false, result = null, hist = [];
+  const pips = () => { $('rpPips').innerHTML = hist.map((h) => `<div class="pip ${h}"></div>`).join(''); $('rpScore').textContent = `${me} – ${opp}`; };
 
-    if (result === 'tie') {
-      document.getElementById('status').textContent = 'Tie — round replayed!';
-    } else {
-      const myScore  = sc?.[myId] || 0;
-      const allScores = Object.values(sc || {});
-      const oppScore = allScores.find((_, i) => Object.keys(sc)[i] !== myId) || 0;
-      document.getElementById('myScore').textContent  = myScore;
-      document.getElementById('oppScore').textContent = oppScore;
-      document.getElementById('status').textContent   = result === 'win' ? 'You won that round!' : 'Opponent won that round.';
-      document.getElementById('roundLbl').textContent = `Round ${r} · Best of 3`;
+  function buttons() {
+    const a = p.shell.actions(`<div class="rpspick">${Object.entries(ICON).map(([k, v]) => `<button class="ga" data-m="${k}" aria-label="${k}">${v}</button>`).join('')}</div>`);
+    a.querySelectorAll('[data-m]').forEach((b) => b.addEventListener('click', () => pick(b.dataset.m, b)));
+  }
+  function pick(m, b) {
+    if (locked || picked) return;
+    picked = m; p.move(m);
+    document.querySelectorAll('[data-m]').forEach((x) => { x.disabled = x !== b; x.classList.toggle('on', x === b); });
+    $('rpMe').textContent = ICON[m];
+    $('rpLog').textContent = 'Locked in · waiting';
+  }
+  function newRound(n, ms = 5000) {
+    picked = null; locked = false;
+    ['rpMe', 'rpOpp'].forEach((id) => { $(id).textContent = '✊'; $(id).className = 'rpsslot shake'; });
+    later(1000, () => { if (!picked) { $('rpMe').textContent = '?'; $('rpMe').className = 'rpsslot'; } $('rpOpp').textContent = '?'; $('rpOpp').className = 'rpsslot'; });
+    $('rpLog').textContent = `Round ${n} · pick your move`;
+    buttons(); p.timer(ms);
+  }
 
-      // Check match over
-      if (myScore >= 2 || oppScore >= 2) return; // pvp:result coming
-    }
-
-    // Reset for next round
-    setTimeout(() => {
-      myMove = null;
-      document.getElementById('myMoveDisplay').textContent  = '❓';
-      document.getElementById('oppMoveDisplay').textContent = '❓';
-      document.getElementById('status').textContent = 'Pick your move!';
-      document.querySelectorAll('.move-btn').forEach(b => { b.disabled = false; b.classList.remove('selected'); });
-    }, 1500);
+  on(socket, {
+    'pvp:opponent_moved': () => { if (!picked) $('rpLog').textContent = `${md.opponent} picked · your turn`; },
+    'pvp:round_result': ({ your_move, opp_move, result: r, round }) => {
+      locked = true; p.timer(0);
+      $('rpMe').textContent = ICON[your_move]; $('rpOpp').textContent = ICON[opp_move];
+      $('rpMe').className = `rpsslot${r === 'win' ? ' win' : r === 'loss' ? ' lose' : ''}`;
+      $('rpOpp').className = `rpsslot${r === 'loss' ? ' win' : r === 'win' ? ' lose' : ''}`;
+      if (r === 'win') { me++; hist.push('w'); } else if (r === 'loss') { opp++; hist.push('l'); }
+      pips();
+      $('rpLog').textContent = r === 'tie' ? 'Draw — replay the round' : r === 'win' ? 'Round won' : 'Round lost';
+      if (!picked) $('rpLog').textContent += ' (auto-picked rock)';
+      if (me < 2 && opp < 2) later(1400, () => newRound(r === 'tie' ? round : round + 1, 3600)); // server's 5s clock is already running
+      else if (result) end();
+    },
+    'pvp:result': (r) => { result = r; if (me >= 2 || opp >= 2) end(); },
   });
+  const end = () => later(1100, () => p.finish({ won: result.you_won, seed: result.seed, sub: `${result.you_won ? 'Won' : 'Lost'} the series ${me}–${opp}` }));
 
-  socket.on('pvp:result', ({ winner_id, pot: p, you_won }) => {
-    document.getElementById('movesRow').style.display = 'none';
-    document.getElementById('status').textContent = '';
-    const rb = document.getElementById('resultBig');
-    rb.textContent = you_won ? '🏆 You Win!' : 'You Lose';
-    rb.className   = `result-big ${you_won ? 'win' : 'loss'}`;
-    document.getElementById('navBtn').style.display = 'block';
-    socket.off('pvp:round_result');
-    socket.off('pvp:result');
-    socket.off('pvp:auto_win');
-  });
-
-  socket.on('pvp:auto_win', ({ pot: p }) => {
-    document.getElementById('movesRow').style.display = 'none';
-    document.getElementById('resultBig').textContent  = '🏆 You Win!';
-    document.getElementById('resultBig').className    = 'result-big win';
-    document.getElementById('status').textContent     = 'Opponent disconnected.';
-    document.getElementById('navBtn').style.display   = 'block';
-    socket.off('pvp:round_result');
-    socket.off('pvp:result');
-    socket.off('pvp:auto_win');
-  });
+  pips();
+  newRound(1);
 }

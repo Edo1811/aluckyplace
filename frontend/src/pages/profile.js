@@ -1,514 +1,390 @@
 import { api } from '../api.js';
 import { store, updateBalance, clearUser } from '../store.js';
-import { renderCosmeticPreview, COSMETIC_PREVIEW_KEYFRAMES, CATEGORY_LABELS, RARITY_COLORS, auraNameStyle, nameColorStyle, nameFontFamily, renderAvatarFrame } from '../cosmeticPreview.js';
+import { renderAvatarFrame, renderCosmeticPreview, CATEGORY_LABELS } from '../cosmeticPreview.js';
+import {
+  $, fmt, esc, hexA, timeAgo, toast, dockHTML, bindNav, onLeave, listen,
+  playerFrame, playerName, playerBadge, RARITY_COLORS, rarityPill,
+  sheetHTML, openSheet, closeSheets, emitBalance, amountOf,
+} from '../ui/core.js';
+import { mountScene } from '../ui/scenes.js';
+import { gameName, GAME_BY_ID } from '../ui/games-meta.js';
 
-let curTab = 0;
-let profileData = null;
-let achievementsCache = null;
-let challengesCache = null;
-let cosmeticsCache = null;
-let historyCache = null;
-let listingPriceFor = null; // user_cosmetic_id currently showing the inline "list for sale" form
+const RAR_LV = { Common: 1, Rare: 2, Epic: 3, Legendary: 4, Exotic: 5, Unique: 6 };
+const CAT_ORDER = ['avatar_frame', 'name_aura', 'name_color', 'name_font', 'chat_badge', 'status_title', 'custom_emoji'];
 
-export async function renderProfile(app) {
-  curTab = 0;
-  achievementsCache = null;
-  challengesCache = null;
-  cosmeticsCache = null;
-  historyCache = null;
-  listingPriceFor = null;
-
-  inject(app);
-  bindEvents(app);
-  await loadProfile();
+const CSS = `
+.hero{position:relative;margin:12px 12px 0;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:#070707}
+.hero canvas{position:absolute;inset:0;width:100%;height:100%}
+.hero-in{position:relative;z-index:2;padding:24px 18px 16px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:3px}
+.avslot{position:relative;margin-bottom:12px}
+.av-badge{position:absolute;bottom:4px;right:4px;z-index:6}
+.av-badge .badge{width:26px;height:26px;font-size:13px;border-radius:9px;background:#0a0a0a!important}
+.ptitle-big{font-size:12.5px;font-style:italic;color:rgba(255,255,255,.4)}
+.pbadge{display:inline-block;margin-top:7px;padding:3px 11px;border-radius:20px;font-size:10.5px;font-weight:700;letter-spacing:.04em}
+.bals{display:flex;gap:22px;margin-top:14px}
+.bal-v{font-size:21px;font-weight:700;line-height:1}
+.bal-v.cc{color:var(--em)}.bal-v.a{color:var(--gold)}
+.bal-l{font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.24);margin-top:4px}
+.acts{display:flex;gap:8px;margin-top:16px;width:100%;max-width:340px}
+.acts .btn{flex:1}
+.since{font-size:10.5px;color:rgba(255,255,255,.22);margin-top:10px}
+.wr{margin:12px 12px 0;padding:14px 16px;border-radius:16px;background:var(--card);border:1px solid var(--line)}
+.wr-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
+.wr-pct{font-size:22px;font-weight:700}
+.wr-lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.24)}
+.wr-bar{height:7px;border-radius:4px;overflow:hidden;display:flex;background:rgba(255,255,255,.06)}
+.wr-bar i{display:block;height:100%}
+.wr-legend{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:rgba(255,255,255,.3)}
+.wr-legend b.g{color:var(--em)}.wr-legend b.r{color:var(--red)}
+.ptabs{padding:18px 12px 4px}
+.content{padding:14px 12px 24px}
+.streaks{display:flex;gap:9px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.streaks::-webkit-scrollbar{display:none}
+.sk{position:relative;flex:0 0 152px;height:104px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#080808}
+.sk canvas{position:absolute;inset:0;width:100%;height:100%}
+.sk-scrim{position:absolute;inset:0;background:linear-gradient(to top,rgba(5,5,5,.95) 12%,rgba(5,5,5,.45) 60%,rgba(5,5,5,.05))}
+.sk-in{position:absolute;inset:0;padding:12px;display:flex;flex-direction:column;justify-content:flex-end;z-index:2}
+.sk-n{font-size:29px;font-weight:700;color:var(--em);line-height:1}
+.sk-g{font-size:12px;font-weight:700;margin-top:2px}
+.sk-l{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.26)}
+.spark{border-radius:16px;border:1px solid var(--line);background:var(--card);padding:14px 4px 10px}
+.spark-top{display:flex;justify-content:space-between;align-items:baseline;padding:0 12px 8px}
+.spark-v{font-size:20px;font-weight:700}
+.spark-d{font-size:12px;font-weight:700}
+.spark-c{height:88px;position:relative}
+.spark-c canvas{position:absolute;inset:0;width:100%;height:100%}
+.spark-foot{display:flex;justify-content:space-between;padding:6px 12px 0;font-size:10px;color:rgba(255,255,255,.22)}
+.quad{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+.q{border-radius:14px;border:1px solid var(--line);background:var(--card);padding:15px 14px}
+.q-v{font-size:21px;font-weight:700;line-height:1.1}
+.q-l{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.24);margin-top:5px}
+.g{color:var(--em)}.r{color:var(--red)}
+.abar{height:5px;border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden;margin:0 4px 14px}
+.abar i{display:block;height:100%;background:var(--em)}
+.agrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.ach{border-radius:14px;border:1px solid rgba(255,255,255,.07);background:var(--card);padding:14px 8px 11px;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;position:relative}
+.ach .ae{font-size:26px;line-height:1}
+.ach-n{font-size:11px;font-weight:700;line-height:1.25}
+.ach-d{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.22)}
+.ach.locked{opacity:.34;filter:grayscale(1)}
+.lockg{position:absolute;top:9px;right:9px;width:11px;height:11px;stroke:rgba(255,255,255,.45);fill:none;stroke-width:1.6}
+.chal{border-radius:14px;border:1px solid rgba(255,255,255,.07);background:var(--card);padding:14px;margin-bottom:9px}
+.chal-t{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:10px}
+.chal-n{font-size:13.5px;font-weight:700}
+.chal-r{font-size:11.5px;font-weight:700;color:var(--gold);white-space:nowrap}
+.chal-d{font-size:11.5px;font-style:italic;color:rgba(255,255,255,.32);margin-bottom:10px}
+.chal-b{height:5px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+.chal-b i{display:block;height:100%;border-radius:3px}
+.chal-p{display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.25);margin-top:6px}
+.chal.done{border-color:rgba(212,175,55,.26);background:rgba(212,175,55,.05)}
+.chal-badge{font-size:10px;padding:2px 9px;border-radius:9px;background:rgba(212,175,55,.14);color:var(--gold);border:1px solid rgba(212,175,55,.25)}
+.cgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+.ci{border-radius:14px;border:1px solid rgba(255,255,255,.07);background:var(--card);overflow:hidden;position:relative}
+.ci.eq{border-color:rgba(16,185,129,.35)}
+.ci-prev{height:86px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.ci-body{padding:10px 12px 12px}
+.ci-n{font-size:12.5px;font-weight:700;line-height:1.2}
+.ci-c{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.24);margin-top:3px}
+.ci-r{font-size:10px;font-weight:700;margin-top:6px;letter-spacing:.04em}
+.ci-btns{display:flex;gap:6px;margin-top:10px}
+.ci-btns .btn{flex:1;padding:8px 0;font-size:11.5px}
+.ci-tag{position:absolute;top:8px;left:8px;font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;padding:2px 7px;border-radius:7px;background:rgba(16,185,129,.18);color:var(--em);z-index:3}
+.fh{border-radius:14px;border:1px solid var(--line);background:var(--card);padding:13px 14px;margin-bottom:8px}
+.fh-t{display:flex;justify-content:space-between;align-items:baseline}
+.fh-g{font-size:13.5px;font-weight:700}
+.fh-r{font-size:14px;font-weight:700}
+.fh-m{font-size:10.5px;color:rgba(255,255,255,.26);margin-top:2px}
+.fh-h{display:flex;align-items:center;gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+.hash{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:rgba(255,255,255,.3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp{padding:5px 10px;border-radius:8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.45);font-size:10px;cursor:pointer;flex-shrink:0}
+.cp.ok{color:var(--em);border-color:rgba(16,185,129,.3)}
+.sell-prev{display:flex;align-items:center;justify-content:center;height:90px;border-radius:14px;margin-bottom:14px}
+.receipt{margin-top:12px;border-radius:13px;border:1px solid var(--line);padding:12px 14px;font-size:12.5px}
+.receipt div{display:flex;justify-content:space-between;padding:3px 0;color:rgba(255,255,255,.5)}
+@media(min-width:900px){
+  .cols{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start;padding:0 16px}
+  .hero,.wr{margin-left:0;margin-right:0}
+  .ptabs{padding:12px 0 4px}
+  .content{padding:14px 0 30px}
+  .agrid{grid-template-columns:repeat(4,1fr)}
+  .cgrid{grid-template-columns:repeat(3,1fr)}
+  .quad{grid-template-columns:repeat(4,1fr)}
+  .sk{flex:0 0 180px;height:120px}
 }
+`;
+
+let P = null, viewing = '', tab = 'overview', cache = {};
+
+export async function renderProfile(app, data) {
+  viewing = (data && data.username) || store.user?.username || '';
+  tab = (data && data.tab) || 'overview';
+  cache = {};
+  app.innerHTML = `<style>${CSS}</style><div class="page-load">Loading…</div>${dockHTML(isOwn() ? 'profile' : 'social')}`;
+  bindNav(app);
+  try { P = await api.get(`/profile/${encodeURIComponent(viewing)}`); }
+  catch (err) {
+    app.innerHTML = `<style>${CSS}</style><div class="empty" style="flex:1;display:flex;align-items:center;justify-content:center">${esc(err.message || "Couldn't load this profile")}</div>${dockHTML('profile')}`;
+    bindNav(app); return;
+  }
+  if (isOwn()) { try { cache.history = (await api.get('/games/history?limit=50')).results || []; } catch { cache.history = []; } }
+  inject(app);
+}
+
+const isOwn = () => viewing === store.user?.username;
 
 function inject(app) {
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cinzel@5/index.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/dancing-script@5/index.css">
-    <style>
-      ${COSMETIC_PREVIEW_KEYFRAMES}
-      *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .pp{display:flex;flex-direction:column;height:100vh;background:#050505;font-family:'Playfair Display',Georgia,serif}
-
-      .hero{padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
-      .hero-top{display:flex;align-items:flex-start;gap:22px;margin-bottom:14px}
-      .av-wrap{position:relative;flex-shrink:0}
-      .hero-info{flex:1;min-width:0}
-      .hero-name{font-size:22px;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-      .hero-aura{display:inline-block;padding:1px 10px;border-radius:12px;font-size:11px;font-weight:700;letter-spacing:.04em}
-      .hero-title{font-size:12px;font-style:italic;margin-top:3px;color:rgba(255,255,255,.4)}
-      .hero-bal{font-size:13px;color:rgba(255,255,255,.35);margin-top:4px;display:flex;gap:12px}
-      .hb{color:#10b981;font-weight:700}
-      .hba{color:#D4AF37;font-weight:700}
-      .hero-actions{display:flex;gap:7px;margin-top:8px;flex-wrap:wrap}
-      .ha{padding:6px 14px;border-radius:8px;font-size:11.5px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer;border:none;transition:all .15s}
-      .ha.pri{background:#10b981;color:#fff}
-      .ha.pri:hover{background:#0ea472}
-      .ha.sec{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5)}
-      .ha.sec:hover{background:rgba(255,255,255,.1)}
-      .ha.danger{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.18);color:#ef4444}
-      .ha.danger:hover{background:rgba(239,68,68,.15)}
-
-      .qstats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-      .qs{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px 12px;text-align:center}
-      .qs-n{font-size:18px;font-weight:700;color:#fff}
-      .qs-l{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.22);margin-top:2px}
-
-      .tabs{display:flex;gap:2px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:3px;margin:12px 20px 0;flex-shrink:0}
-      .tb{flex:1;padding:8px 0;background:none;border:none;border-radius:7px;color:rgba(255,255,255,.3);font-size:12px;cursor:pointer;font-family:'Playfair Display',Georgia,serif;transition:background .18s,color .18s}
-      .tb.on{background:rgba(16,185,129,.12);color:#10b981;font-weight:700}
-
-      .tcontent{flex:1;overflow-y:auto;padding:16px 20px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.07) transparent}
-      .tcontent::-webkit-scrollbar{width:3px}
-      .tcontent::-webkit-scrollbar-thumb{background:rgba(255,255,255,.08)}
-
-      .sec-title{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.2);margin-bottom:10px}
-      .streaks-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px}
-      .sk{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:12px}
-      .sk-game{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.25);margin-bottom:5px}
-      .sk-n{font-size:26px;font-weight:700;color:#10b981;line-height:1}
-      .sk-lbl{font-size:10px;color:rgba(255,255,255,.25);margin-top:1px}
-      .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-      .strow{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center}
-      .stlbl{font-size:12px;color:rgba(255,255,255,.35)}
-      .stval{font-size:14px;font-weight:700;color:#fff}
-      .stval.red{color:#ef4444}
-      .stval.grn{color:#10b981}
-      .empty-note{font-size:12px;color:rgba(255,255,255,.25);text-align:center;padding:30px 10px;font-style:italic}
-
-      .ach-section{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.25);margin:14px 0 8px;display:flex;align-items:center;gap:8px}
-      .ach-section::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.06)}
-      .ach-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:6px}
-      .ach{width:100%;aspect-ratio:1;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;position:relative;cursor:help}
-      .ach.unlocked{background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.18)}
-      .ach.locked{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.04);opacity:.45;filter:grayscale(1)}
-      .ach-em{font-size:22px}
-      .ach-name{font-size:8px;color:rgba(255,255,255,.45);text-align:center;line-height:1.25;padding:0 3px}
-      .ach[data-tip]:hover::after{
-        content:attr(data-tip);white-space:pre-line;position:absolute;bottom:112%;left:50%;transform:translateX(-50%);
-        background:#0d0d0d;border:1px solid rgba(255,255,255,.15);color:#fff;font-size:10.5px;font-weight:400;
-        padding:9px 11px;border-radius:8px;width:150px;text-align:center;z-index:60;
-        box-shadow:0 10px 24px rgba(0,0,0,.6);pointer-events:none;line-height:1.5;font-style:normal;
-      }
-      .ach[data-tip]:hover::before{
-        content:'';position:absolute;bottom:100%;left:50%;transform:translateX(-50%);
-        border:5px solid transparent;border-top-color:#0d0d0d;z-index:61;
-      }
-      .chal-section{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.25);margin:14px 0 8px;display:flex;align-items:center;gap:8px}
-      .chal-section::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.06)}
-      .cos-section{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.28);margin:18px 0 9px;display:flex;align-items:center;gap:8px}
-      .cos-section:first-child{margin-top:0}
-      .cos-section::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.06)}
-      .chal{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:11px;padding:13px 14px;margin-bottom:8px}
-      .chal-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px}
-      .chal-name{font-size:13px;font-weight:700;color:#fff}
-      .chal-rew{font-size:11px;color:#D4AF37;font-weight:700;flex-shrink:0}
-      .chal-desc{font-size:11.5px;color:rgba(255,255,255,.32);margin-bottom:8px;font-style:italic}
-      .chal-bar{height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;margin-bottom:4px}
-      .chal-fill{height:100%;border-radius:3px;transition:width .5s}
-      .chal-prog{font-size:10px;color:rgba(255,255,255,.25);display:flex;justify-content:space-between}
-      .chal.done{border-color:rgba(212,175,55,.25);background:rgba(212,175,55,.05)}
-      .chal-claim{font-size:10px;padding:4px 10px;border-radius:8px;background:rgba(212,175,55,.18);color:#D4AF37;border:1px solid rgba(212,175,55,.3);cursor:pointer;font-family:'Playfair Display',Georgia,serif;font-weight:700}
-      .chal-done-badge{font-size:10px;padding:2px 9px;border-radius:8px;background:rgba(212,175,55,.15);color:#D4AF37;border:1px solid rgba(212,175,55,.25)}
-
-      .owned-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
-      .citem{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);border-radius:11px;padding:11px;position:relative}
-      .citem.equipped{border-color:rgba(16,185,129,.35);background:rgba(16,185,129,.06)}
-      .citem-eq{position:absolute;top:7px;right:7px;font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(16,185,129,.2);color:#10b981;font-weight:700;letter-spacing:.04em}
-      .citem-prev{height:52px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:8px;position:relative}
-      .citem-rbar{position:absolute;bottom:0;left:0;right:0;height:2px}
-      .citem-name{font-size:11.5px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .citem-cat{font-size:9.5px;color:rgba(255,255,255,.25);margin-top:1px}
-      .citem-rar{font-size:9px;font-weight:700;margin-top:5px;margin-bottom:8px}
-      .citem-btns{display:flex;gap:5px}
-      .cbtn{flex:1;padding:6px;border-radius:7px;font-size:10.5px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer;border:none}
-      .cbtn.eq{background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.22)}
-      .cbtn.uneq{background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.2)}
-      .cbtn.list{background:rgba(212,175,55,.1);color:#D4AF37;border:1px solid rgba(212,175,55,.2)}
-      .list-form{display:flex;gap:5px;margin-top:6px}
-      .list-input{flex:1;width:0;padding:6px 8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:#fff;font-size:11px;font-family:'Playfair Display',Georgia,serif}
-      .list-confirm{padding:6px 9px;background:#D4AF37;color:#000;border:none;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer;font-family:'Playfair Display',Georgia,serif}
-
-      .hist-row{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:10px;border:1px solid rgba(255,255,255,.06);margin-bottom:6px;background:rgba(255,255,255,.025)}
-      .hist-game{font-size:12px;font-weight:700;color:#fff;flex:1;text-transform:capitalize}
-      .hist-seed{font-family:monospace;font-size:9.5px;color:rgba(255,255,255,.2);flex:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .hist-verify{padding:5px 10px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.15);border-radius:7px;color:#10b981;font-size:10px;font-family:'Playfair Display',Georgia,serif;cursor:pointer;white-space:nowrap;border:1px solid rgba(16,185,129,.15)}
-      .hist-res{font-size:11px;font-weight:700;flex-shrink:0}
-      .hist-res.w{color:#10b981}
-      .hist-res.l{color:#ef4444}
-
-      .dock-wrap{display:flex;justify-content:center;padding:8px 0 11px;background:#050505;border-top:1px solid rgba(255,255,255,.05);flex-shrink:0}
-      .pill{display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:40px;padding:6px 14px;gap:2px}
-      .di{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;cursor:pointer;position:relative;transition:background .15s}
-      .di:hover{background:rgba(255,255,255,.07)}
-      .di.on svg{opacity:1}
-      .di.on::after{content:'';position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:#10b981}
-      .di svg{opacity:.4;transition:opacity .15s}
-      .toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);padding:10px 22px;border-radius:10px;font-size:13px;font-weight:700;white-space:nowrap;z-index:200;opacity:0;transition:opacity .25s;pointer-events:none;font-family:'Playfair Display',Georgia,serif}
-      .toast.green{background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.35);color:#10b981}
-      .toast.red{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.35);color:#ef4444}
-      .toast.gold{background:rgba(212,175,55,.15);border:1px solid rgba(212,175,55,.35);color:#D4AF37}
-      .toast.show{opacity:1}
-    </style>
-
-    <div class="pp">
-      <div class="hero" id="hero"><div class="empty-note">Loading…</div></div>
-      <div class="tabs">
-        <button class="tb on" id="tab0">Overview</button>
-        <button class="tb" id="tab1">Achievements</button>
-        <button class="tb" id="tab2">Cosmetics</button>
-        <button class="tb" id="tab3">Fair History</button>
+  const tabs = [['overview', 'Overview'], ...(isOwn() ? [['achievements', 'Achievements']] : []), ['cosmetics', isOwn() ? 'Cosmetics' : 'Loadout'], ...(isOwn() ? [['history', 'Fair history']] : [])];
+  if (!tabs.find((t) => t[0] === tab)) tab = 'overview';
+  app.innerHTML = `<style>${CSS}</style>
+  <div class="scroll" id="pscroll"><div class="wrap">
+    <div class="cols">
+      <div><div class="hero" id="hero"></div><div class="wr" id="wr"></div></div>
+      <div>
+        <div class="tabs ptabs" id="ptabs">${tabs.map(([k, n]) => `<button class="tb${k === tab ? ' on' : ''}" data-t="${k}">${n}</button>`).join('')}</div>
+        <div class="content" id="content"></div>
       </div>
-      <div class="tcontent" id="tcontent"></div>
-      <div class="dock-wrap">
-        <div class="pill">
-          <div class="di" id="nav-home"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7.5L9 2l7 5.5V16H2V7.5z"/><path d="M6.5 16v-5h5v5"/></svg></div>
-          <div class="di" id="nav-games"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="14" height="9" rx="2.5"/><path d="M6 9.5h2m-1-1v2"/><circle cx="12" cy="9" r=".85" fill="white"/><circle cx="13.8" cy="10.2" r=".85" fill="white"/></svg></div>
-          <div class="di"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6" r="2.5"/><path d="M1.5 15c0-2.76 2.24-5 5-5s5 2.24 5 5"/><circle cx="13" cy="5.5" r="2"/><path d="M16.5 14c0-2.21-1.57-4-3.5-4"/></svg></div>
-          <div class="di" id="nav-shop"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h10l-1.2 8H5.2L4 4z"/><path d="M6.5 4c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5"/><circle cx="6.5" cy="14.5" r="1"/><circle cx="11.5" cy="14.5" r="1"/></svg></div>
-          <div class="di on"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="3"/><path d="M2 16c0-3.87 3.13-7 7-7s7 3.13 7 7"/></svg></div>
-        </div>
-      </div>
-      <div class="toast" id="toast"></div>
     </div>
-  `;
+  </div></div>
+  ${dockHTML(isOwn() ? 'profile' : 'social')}
+  ${sheetHTML('shSell', 'List for sale', '<div id="sellBody"></div>', '<button class="btn" data-close>Cancel</button><button class="btn em" id="sellGo">List it</button>')}`;
+  bindNav(app);
+  document.querySelectorAll('#ptabs [data-t]').forEach((b) => b.addEventListener('click', () => {
+    tab = b.dataset.t;
+    document.querySelectorAll('#ptabs [data-t]').forEach((x) => x.classList.toggle('on', x === b));
+    renderTab();
+  }));
+  renderHero(); renderWr(); renderTab();
+  listen(document, 'balance:updated', () => { if (isOwn()) { P.cc_balance = store.ccBalance; P.a_balance = store.aBalance; renderHero(); } });
 }
 
-function showToast(msg, type = 'green') {
-  const el = document.getElementById('toast');
-  if (!el) return;
-  el.textContent = msg;
-  el.className = `toast ${type} show`;
-  setTimeout(() => el.classList.remove('show'), 3200);
-}
-
-async function loadProfile() {
-  try {
-    profileData = await api.get(`/profile/${store.user.username}`);
-  } catch (err) {
-    showToast(err.message || 'Failed to load profile', 'red');
-    profileData = null;
-  }
-  renderHero();
-  await renderTab();
+function rarest() {
+  const items = Object.values(P.equipped || {}).filter((x) => x && x.rarity);
+  return items.sort((a, b) => (RAR_LV[b.rarity] || 0) - (RAR_LV[a.rarity] || 0))[0] || null;
 }
 
 function renderHero() {
-  const el = document.getElementById('hero');
-  if (!profileData) { el.innerHTML = `<div class="empty-note">Couldn't load this profile.</div>`; return; }
+  const eq = P.equipped || {};
+  const r = rarest(), rc = r ? (RARITY_COLORS[r.rarity] || '#10b981') : '#10b981';
+  const title = eq.status_title ? eq.status_title.name : '';
+  $('hero').innerHTML = `<canvas id="heroCv"></canvas><div class="hero-in">
+    <div class="avslot">${playerFrame(P.username, eq, 117)}<div class="av-badge">${playerBadge(eq)}</div></div>
+    <div style="line-height:1.1">${playerName(P.username, eq, 31)}</div>
+    ${title ? `<div class="ptitle-big">"${esc(title)}"</div>` : ''}
+    ${r ? `<div class="pbadge" style="background:${hexA(rc, .14)};color:${rc};border:1px solid ${hexA(rc, .28)}">${esc(r.name)} <span style="opacity:.6;font-weight:400">${esc(r.rarity)}</span></div>` : ''}
+    <div class="bals"><div><div class="bal-v cc">${fmt(P.cc_balance)}</div><div class="bal-l">Credits</div></div>
+      <div><div class="bal-v a">${fmt(P.a_balance)}</div><div class="bal-l">Tokens</div></div></div>
+    <div class="acts">${isOwn()
+      ? '<button class="btn em" id="toListings">My listings</button><button class="btn" id="logout">Log out</button>'
+      : '<button class="btn" id="back">Back</button>'}</div>
+    <div class="since">Member since ${new Date(P.member_since).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
+  </div>`;
+  heroBackdrop(rc);
+  $('toListings')?.addEventListener('click', () => window.__navigate('shop', { filterMine: true }));
+  $('back')?.addEventListener('click', () => window.__navigate('social'));
+  $('logout')?.addEventListener('click', async () => {
+    try { await api.post('/auth/logout'); } catch { /* ignore */ }
+    localStorage.removeItem('token'); localStorage.removeItem('user'); clearUser();
+    window.__navigate('landing');
+  });
+}
 
-  const p = profileData;
-  const aura = p.equipped.name_aura;
-  const frame = p.equipped.avatar_frame;
-  const title = p.equipped.status_title;
-  const color = p.equipped.name_color;
-  const font = p.equipped.name_font;
+// slow drifting glow tinted by the rarest equipped item
+let heroTimer = 0;
+function heroBackdrop(col) {
+  clearTimeout(heroTimer);
+  const cv = $('heroCv'), c = cv.getContext('2d');
+  const step = (now) => {
+    const t = now / 1000, r = cv.getBoundingClientRect();
+    if (r.width) {
+      const d = Math.min(devicePixelRatio || 1, 2); cv.width = r.width * d; cv.height = r.height * d; c.setTransform(d, 0, 0, d, 0, 0);
+      const W = r.width, H = r.height;
+      [[0.24, 0.3, 0.55], [0.78, 0.24, 0.42], [0.55, 0.85, 0.6]].forEach((b, i) => {
+        const x = W * (b[0] + Math.sin(t * 0.22 + i * 2) * 0.07), y = H * (b[1] + Math.cos(t * 0.19 + i * 1.4) * 0.12), rad = H * b[2];
+        const g = c.createRadialGradient(x, y, 0, x, y, rad); g.addColorStop(0, hexA(col, .2)); g.addColorStop(1, hexA(col, 0));
+        c.fillStyle = g; c.fillRect(0, 0, W, H);
+      });
+    }
+    if (cv.isConnected) heroTimer = setTimeout(() => requestAnimationFrame(step), 50);
+  };
+  requestAnimationFrame(step);
+  onLeave(() => clearTimeout(heroTimer));
+}
 
-  const auraName = auraNameStyle(aura);
-  const colorName = nameColorStyle(color);
-  const fontName = nameFontFamily(font);
-
-  // Four independent layers on the same span: fill color (or prismatic
-  // gradient — possibly overridden by the font's own fill technique, e.g.
-  // Neon Outline or Engraved Gold), typography, and glow.
-  const nameStyle = `${colorName.style}${fontName.style}${auraName.style}`;
-  const nameClass = `${colorName.className} ${fontName.className} ${auraName.className}`.trim();
-
-  const titleCol = title ? (RARITY_COLORS[title.rarity] || 'rgba(255,255,255,.4)') : null;
-
-  el.innerHTML = `
-    <div class="hero-top">
-      <div class="av-wrap">
-        ${renderAvatarFrame(frame, 64)}
-      </div>
-      <div class="hero-info">
-        <div class="hero-name">
-          <span class="${nameClass}" style="${nameStyle}">${p.username}</span>
-          ${aura ? `<span class="hero-aura" style="background:${auraName.color}22;color:${auraName.color}">${aura.name}</span>` : ''}
-        </div>
-        ${title ? `<div class="hero-title" style="color:${titleCol}">"${title.name}"</div>` : ''}
-        <div class="hero-bal"><span>CC <span class="hb">${Number(p.cc_balance).toLocaleString()}</span></span><span>A <span class="hba">${Number(p.a_balance).toLocaleString()}</span></span></div>
-        <div class="hero-actions">
-          <button class="ha pri" id="editProfileBtn">Edit Profile</button>
-          <button class="ha sec" id="myListingsBtn">My Listings</button>
-          <button class="ha danger" id="logoutBtn">Log Out</button>
-        </div>
-      </div>
-    </div>
-    <div class="qstats">
-      <div class="qs"><div class="qs-n">${p.stats.total_games.toLocaleString()}</div><div class="qs-l">Games</div></div>
-      <div class="qs"><div class="qs-n" style="color:#10b981">${p.stats.total_wins}</div><div class="qs-l">Won</div></div>
-      <div class="qs"><div class="qs-n" style="color:#ef4444">${Math.max(p.stats.total_games - p.stats.total_wins, 0)}</div><div class="qs-l">Lost</div></div>
-      <div class="qs"><div class="qs-n">${p.stats.win_rate}%</div><div class="qs-l">Win Rate</div></div>
-    </div>`;
+function renderWr() {
+  const s = P.stats || {}, games = Number(s.total_games) || 0, won = Number(s.total_wins) || 0, pct = games ? Math.round(won / games * 100) : 0;
+  $('wr').innerHTML = `<div class="wr-top"><div class="wr-pct">${pct}%</div><div class="wr-lbl">Win rate · ${fmt(games)} games</div></div>
+    <div class="wr-bar"><i style="width:${pct}%;background:var(--em)"></i><i style="width:${100 - pct}%;background:rgba(239,68,68,.55)"></i></div>
+    <div class="wr-legend"><span><b class="g">${fmt(won)}</b> won</span><span><b class="r">${fmt(games - won)}</b> lost</span></div>`;
 }
 
 async function renderTab() {
-  const c = document.getElementById('tcontent');
-  if (curTab === 0) return renderOverview(c);
-  if (curTab === 1) return renderAchievements(c);
-  if (curTab === 2) return renderCosmetics(c);
-  return renderHistory(c);
+  const c = $('content'); if (!c) return;
+  if (tab === 'overview') return overview(c);
+  if (tab === 'achievements') return achievements(c);
+  if (tab === 'cosmetics') return cosmetics(c);
+  return fairHistory(c);
 }
 
-function renderOverview(c) {
-  if (!profileData) { c.innerHTML = `<div class="empty-note">Nothing to show.</div>`; return; }
-  const p = profileData;
-
+// ── overview ────────────────────────────────────────────────────────────────
+function overview(c) {
+  const s = P.stats || {};
+  const streaks = P.win_streaks || [];
   c.innerHTML = `
-    <div class="sec-title">Active Win Streaks</div>
-    <div class="streaks-grid">
-      ${p.win_streaks.length === 0
-        ? `<div class="empty-note" style="grid-column:1/-1;padding:14px">No active streaks right now — go win some games.</div>`
-        : p.win_streaks.map(s => `<div class="sk">
-            <div class="sk-game">${s.game}</div>
-            <div class="sk-n">${s.current_streak}</div>
-            <div class="sk-lbl">win streak</div>
-          </div>`).join('')}
-    </div>
-    <div class="sec-title">All-Time Stats</div>
-    <div class="stats-grid">
-      <div class="strow"><span class="stlbl">Biggest win</span><span class="stval grn">${Number(p.stats.biggest_win).toLocaleString()} CC</span></div>
-      <div class="strow"><span class="stlbl">Biggest loss</span><span class="stval red">${Number(p.stats.biggest_loss).toLocaleString()} CC</span></div>
-      <div class="strow"><span class="stlbl">Bankruptcies</span><span class="stval${p.stats.bankruptcy_count > 0 ? ' red' : ''}">${p.stats.bankruptcy_count}</span></div>
-      <div class="strow"><span class="stlbl">Best streak</span><span class="stval">${p.stats.best_streak_overall} wins</span></div>
+    ${streaks.length ? `<div class="sec first">Running hot</div><div class="streaks">${streaks.map((k) => {
+      const g = GAME_BY_ID[k.game];
+      return `<div class="sk"><canvas data-sc="${g ? g.scene : 'coin'}"></canvas><div class="sk-scrim"></div>
+        <div class="sk-in"><div class="sk-n">${k.current_streak}</div><div class="sk-g">${esc(gameName(k.game))}</div><div class="sk-l">win streak</div></div></div>`;
+    }).join('')}</div>` : ''}
+    ${isOwn() && cache.history?.length ? `<div class="sec${streaks.length ? '' : ' first'}">Last ${cache.history.length} games</div>
+      <div class="spark"><div class="spark-top"><div class="spark-v">${fmt(P.cc_balance)} <span style="font-size:11px;color:rgba(255,255,255,.25)">CC</span></div><div class="spark-d" id="sparkD"></div></div>
+      <div class="spark-c"><canvas id="sparkCv"></canvas></div><div class="spark-foot"><span id="sparkLo"></span><span id="sparkHi"></span></div></div>` : ''}
+    <div class="sec">All time</div>
+    <div class="quad">
+      <div class="q"><div class="q-v g">${fmt(s.biggest_win)} CC</div><div class="q-l">Biggest win</div></div>
+      <div class="q"><div class="q-v r">${fmt(Math.abs(Number(s.biggest_loss) || 0))} CC</div><div class="q-l">Biggest loss</div></div>
+      <div class="q"><div class="q-v${Number(s.bankruptcy_count) ? ' r' : ''}">${fmt(s.bankruptcy_count)}</div><div class="q-l">Bankruptcies</div></div>
+      <div class="q"><div class="q-v">${fmt(s.best_streak_overall)}</div><div class="q-l">Best streak</div></div>
     </div>`;
+  c.querySelectorAll('[data-sc]').forEach((cv) => mountScene(cv, cv.dataset.sc, { fps: 24 }));
+  if ($('sparkCv')) spark();
+}
+function spark() {
+  const H0 = cache.history, pts = [Number(P.cc_balance)];
+  let b = Number(P.cc_balance);
+  for (const r of H0) { b -= Number(r.net) || 0; pts.unshift(Math.max(0, b)); }
+  const lo = Math.min(...pts), hi = Math.max(...pts), d = pts[pts.length - 1] - pts[0];
+  $('sparkD').textContent = `${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))} CC`;
+  $('sparkD').style.color = d >= 0 ? 'var(--em)' : 'var(--red)';
+  $('sparkLo').textContent = `Low ${fmt(lo)} CC`; $('sparkHi').textContent = `Peak ${fmt(hi)} CC`;
+  const cv = $('sparkCv'), r = cv.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = r.width, H = r.height, up = d >= 0, col = up ? '16,185,129' : '239,68,68', pad = 12;
+  const x = (i) => pad + i / (pts.length - 1) * (W - pad * 2), y = (v) => H - 10 - ((v - lo) / ((hi - lo) || 1)) * (H - 26);
+  const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, `rgba(${col},.22)`); g.addColorStop(1, `rgba(${col},0)`);
+  c.beginPath(); c.moveTo(x(0), H); pts.forEach((v, i) => c.lineTo(x(i), y(v))); c.lineTo(x(pts.length - 1), H); c.closePath(); c.fillStyle = g; c.fill();
+  c.beginPath(); pts.forEach((v, i) => (i ? c.lineTo(x(i), y(v)) : c.moveTo(x(i), y(v)))); c.strokeStyle = `rgba(${col},.9)`; c.lineWidth = 2; c.lineJoin = 'round'; c.stroke();
+  const L = pts.length - 1;
+  c.beginPath(); c.arc(x(L), y(pts[L]), 4, 0, 7); c.fillStyle = `rgb(${col})`; c.fill();
+  c.beginPath(); c.arc(x(L), y(pts[L]), 9, 0, 7); c.fillStyle = `rgba(${col},.16)`; c.fill();
 }
 
-async function renderAchievements(c) {
-  c.innerHTML = `<div class="empty-note">Loading…</div>`;
+// ── achievements + challenges ───────────────────────────────────────────────
+async function achievements(c) {
+  c.innerHTML = '<div class="page-load" style="padding:30px">Loading…</div>';
   try {
-    if (!achievementsCache) achievementsCache = (await api.get('/achievements')).achievements;
-    if (!challengesCache) challengesCache = (await api.get('/challenges')).challenges;
-  } catch (err) {
-    c.innerHTML = `<div class="empty-note">Failed to load achievements.</div>`;
-    return;
-  }
-
-  const unlocked = achievementsCache.filter(a => a.unlocked).sort((a, b) => new Date(b.unlocked_at) - new Date(a.unlocked_at));
-  const locked = achievementsCache.filter(a => !a.unlocked);
-
-  const tip = a => {
-    const status = a.unlocked
-      ? `✓ Unlocked ${new Date(a.unlocked_at).toLocaleDateString()}`
-      : '🔒 Locked';
-    return `${a.name}\n${a.description}\n${status}`;
-  };
-
-  const achCard = a => `<div class="ach ${a.unlocked ? 'unlocked' : 'locked'}" data-tip="${tip(a)}">
-    <span class="ach-em">${a.emoji}</span>
-    <span class="ach-name">${a.name}</span>
-  </div>`;
-
-  const ready = challengesCache.filter(ch => ch.completed && !ch.reward_claimed);
-  const inProgress = challengesCache.filter(ch => !ch.completed);
-  const claimed = challengesCache.filter(ch => ch.completed && ch.reward_claimed);
-
-  const chalCard = ch => {
-    const pct = Math.min((ch.progress / ch.target) * 100, 100);
-    const col = ch.completed ? '#D4AF37' : '#10b981';
-    return `<div class="chal${ch.completed ? ' done' : ''}">
-      <div class="chal-top">
-        <span class="chal-name">${ch.name}</span>
-        ${ch.reward_claimed
-          ? '<span class="chal-done-badge">✓ Claimed</span>'
-          : ch.completed
-            ? `<button class="chal-claim" data-claim="${ch.id}">Claim +${ch.reward_a} A</button>`
-            : `<span class="chal-rew">+${ch.reward_a} A</span>`}
-      </div>
-      <div class="chal-desc">${ch.description}</div>
-      <div class="chal-bar"><div class="chal-fill" style="width:${pct}%;background:${col}"></div></div>
-      <div class="chal-prog"><span>${Math.min(ch.progress, ch.target).toLocaleString()} / ${ch.target.toLocaleString()}</span><span>${Math.round(pct)}%</span></div>
-    </div>`;
-  };
-
-  c.innerHTML = `
-    <div class="sec-title">Achievements <span style="text-transform:none;letter-spacing:0;color:rgba(255,255,255,.18)">${unlocked.length} / ${achievementsCache.length} unlocked</span></div>
-
-    ${unlocked.length > 0 ? `<div class="ach-section">Unlocked</div><div class="ach-grid">${unlocked.map(achCard).join('')}</div>` : ''}
-    ${locked.length > 0 ? `<div class="ach-section">Locked</div><div class="ach-grid">${locked.map(achCard).join('')}</div>` : ''}
-
-    <div class="sec-title" style="margin-top:22px">Challenges</div>
-    ${ready.length > 0 ? `<div class="chal-section">Ready to claim</div>${ready.map(chalCard).join('')}` : ''}
-    ${inProgress.length > 0 ? `<div class="chal-section">In progress</div>${inProgress.map(chalCard).join('')}` : ''}
-    ${claimed.length > 0 ? `<div class="chal-section">Claimed</div>${claimed.map(chalCard).join('')}` : ''}`;
+    if (!cache.ach) cache.ach = (await api.get('/achievements')).achievements;
+    if (!cache.chal) cache.chal = (await api.get('/challenges')).challenges;
+  } catch (err) { c.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  const A = cache.ach, u = A.filter((a) => a.unlocked).length;
+  const lock = '<svg class="lockg" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.2"/><path d="M8.2 10.5V8a3.8 3.8 0 0 1 7.6 0v2.5"/></svg>';
+  c.innerHTML = `<div class="sec first">Achievements <span>${u} of ${A.length}</span></div>
+    <div class="abar"><i style="width:${A.length ? u / A.length * 100 : 0}%"></i></div>
+    <div class="agrid">${A.map((a) => `<div class="ach${a.unlocked ? '' : ' locked'}" title="${esc(a.description)}">${a.unlocked ? '' : lock}
+      <div class="ae">${a.emoji || '🏅'}</div><div class="ach-n">${esc(a.name)}</div>
+      <div class="ach-d">${a.unlocked && a.unlocked_at ? new Date(a.unlocked_at).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : 'Locked'}</div></div>`).join('')}</div>
+    <div class="sec">Challenges</div>
+    ${cache.chal.map((ch) => {
+      const pct = Math.min(100, ch.progress / ch.target * 100), col = ch.completed ? 'var(--gold)' : 'var(--em)';
+      const right = ch.reward_claimed ? '<span class="chal-badge">Claimed</span>'
+        : ch.completed ? `<button class="btn gold sm" data-claim="${ch.id}">Claim +${ch.reward_a} A</button>`
+          : `<span class="chal-r">+${ch.reward_a} A</span>`;
+      return `<div class="chal${ch.completed ? ' done' : ''}"><div class="chal-t"><span class="chal-n">${esc(ch.name)}</span>${right}</div>
+        <div class="chal-d">${esc(ch.description)}</div>
+        <div class="chal-b"><i style="width:${pct}%;background:${col}"></i></div>
+        <div class="chal-p"><span>${fmt(Math.min(ch.progress, ch.target))} / ${fmt(ch.target)}</span><span>${Math.round(pct)}%</span></div></div>`;
+    }).join('')}`;
+  c.querySelectorAll('[data-claim]').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true; b.textContent = '…';
+    try {
+      const res = await api.post(`/challenges/${b.dataset.claim}/claim`);
+      updateBalance({ a_balance: res.a_balance }); emitBalance();
+      toast(`+${res.reward_a} A claimed`, 'gold');
+      cache.chal = null; achievements(c);
+    } catch (err) { toast(err.message || 'Failed to claim', 'red'); b.disabled = false; b.textContent = 'Claim'; }
+  }));
 }
 
-async function renderCosmetics(c) {
-  c.innerHTML = `<div class="empty-note">Loading…</div>`;
-  try {
-    cosmeticsCache = (await api.get(`/profile/${store.user.username}/cosmetics`)).cosmetics;
-  } catch (err) {
-    c.innerHTML = `<div class="empty-note">Failed to load cosmetics.</div>`;
-    return;
-  }
-
-  if (cosmeticsCache.length === 0) {
-    c.innerHTML = `<div class="sec-title">Your Cosmetics</div><div class="empty-note">Nothing yet — open a pack or buy from the Shop.</div>`;
-    return;
-  }
-
-  // Group by category, in a fixed display order, instead of one flat
-  // interleaved grid — this is the bulk of why it looked disorganized.
-  const order = Object.keys(CATEGORY_LABELS);
-  const byCategory = {};
-  for (const it of cosmeticsCache) (byCategory[it.category] ||= []).push(it);
-
-  const cardHTML = it => {
-    const rarityCol = RARITY_COLORS[it.rarity] || '#9ca3af';
-    const preview = renderCosmeticPreview(it);
-    const showForm = listingPriceFor === it.user_cosmetic_id;
-    return `<div class="citem${it.is_equipped ? ' equipped' : ''}">
-      ${it.is_equipped ? '<div class="citem-eq">Equipped</div>' : ''}
-      <div class="citem-prev" style="${preview.boxStyle}">
-        ${preview.innerHTML}
-        <div class="citem-rbar" style="background:${rarityCol}"></div>
-      </div>
-      <div class="citem-name">${it.name}</div>
-      <div class="citem-rar" style="color:${rarityCol}">${it.rarity}</div>
-      <div class="citem-btns">
-        <button class="cbtn ${it.is_equipped ? 'uneq' : 'eq'}" data-equip="${it.cosmetic_id}" data-state="${it.is_equipped}">${it.is_equipped ? 'Unequip' : 'Equip'}</button>
-        <button class="cbtn list" data-list="${it.user_cosmetic_id}">${showForm ? 'Cancel' : 'List'}</button>
-      </div>
-      ${showForm ? `<div class="list-form">
-        <input class="list-input" type="number" min="1" placeholder="Price in A" id="priceInput">
-        <button class="list-confirm" data-confirm-list="${it.user_cosmetic_id}">Confirm</button>
-      </div>` : ''}
-    </div>`;
+// ── cosmetics ───────────────────────────────────────────────────────────────
+function cosmeticPreview(item, size = 1) {
+  if (item.category === 'avatar_frame') return renderAvatarFrame(item, 62 * size, `<span class="av-initial" style="font-size:${18 * size}px">${esc(P.username.slice(0, 1).toUpperCase())}</span>`);
+  if (['name_aura', 'name_color', 'name_font'].includes(item.category)) return playerName(P.username, [item], 20 * size);
+  if (item.category === 'status_title') return `<span style="font-size:${14 * size}px;font-style:italic;color:rgba(255,255,255,.62)">"${esc(item.name)}"</span>`;
+  const p = renderCosmeticPreview(item);
+  return `<div style="transform:scale(${1.2 * size})">${p.innerHTML}</div>`;
+}
+async function cosmetics(c) {
+  c.innerHTML = '<div class="page-load" style="padding:30px">Loading…</div>';
+  try { if (!cache.cos) cache.cos = (await api.get(`/profile/${encodeURIComponent(viewing)}/cosmetics`)).cosmetics; }
+  catch (err) { c.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  const list = cache.cos;
+  if (!list.length) { c.innerHTML = `<div class="empty">${isOwn() ? 'No cosmetics yet. Packs in the shop are where they come from.' : 'Nothing equipped.'}</div>`; return; }
+  const cats = CAT_ORDER.filter((k) => list.some((i) => i.category === k));
+  c.innerHTML = cats.map((cat, ci) => `<div class="sec${ci ? '' : ' first'}">${CATEGORY_LABELS[cat] || cat}</div><div class="cgrid">${
+    list.filter((i) => i.category === cat).sort((a, b) => (b.is_equipped - a.is_equipped) || ((RAR_LV[b.rarity] || 0) - (RAR_LV[a.rarity] || 0))).map((it) => {
+      const rc = RARITY_COLORS[it.rarity] || '#9ca3af';
+      return `<div class="ci${it.is_equipped ? ' eq' : ''}">${it.is_equipped ? '<div class="ci-tag">Equipped</div>' : ''}
+        <div class="ci-prev" style="background:linear-gradient(160deg,${hexA(rc, .13)},${hexA(rc, .02)})">${cosmeticPreview(it)}</div>
+        <div class="ci-body"><div class="ci-n">${esc(it.name)}</div><div class="ci-c">${CATEGORY_LABELS[it.category] || ''}</div>
+        <div class="ci-r" style="color:${rc}">${esc(it.rarity)}</div>
+        ${isOwn() ? `<div class="ci-btns"><button class="btn ${it.is_equipped ? 'red' : 'em'}" data-eq="${it.cosmetic_id}" data-on="${it.is_equipped}">${it.is_equipped ? 'Unequip' : 'Equip'}</button>
+          ${it.is_equipped ? '' : `<button class="btn gold" data-sell="${it.user_cosmetic_id}">Sell</button>`}</div>` : ''}
+        </div></div>`;
+    }).join('')}</div>`).join('');
+  c.querySelectorAll('[data-eq]').forEach((b) => b.addEventListener('click', async () => {
+    const on = b.dataset.on === 'true'; b.disabled = true;
+    try {
+      await api.post(`/cosmetics/${b.dataset.eq}/${on ? 'unequip' : 'equip'}`);
+      toast(on ? 'Unequipped' : 'Equipped', 'em');
+      cache.cos = null;
+      P = await api.get(`/profile/${encodeURIComponent(viewing)}`);
+      renderHero(); cosmetics(c);
+    } catch (err) { toast(err.message || 'Failed to update', 'red'); b.disabled = false; }
+  }));
+  c.querySelectorAll('[data-sell]').forEach((b) => b.addEventListener('click', () => openSell(list.find((i) => i.user_cosmetic_id === b.dataset.sell))));
+}
+const TYPICAL = { Common: 6, Rare: 18, Epic: 45, Legendary: 140, Exotic: 520 };
+function openSell(it) {
+  const rc = RARITY_COLORS[it.rarity] || '#9ca3af';
+  $('sellBody').innerHTML = `<div class="sell-prev" style="background:radial-gradient(80% 90% at 50% 100%,${hexA(rc, .18)},transparent 70%)">${cosmeticPreview(it, 1.2)}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><b>${esc(it.name)}</b>${rarityPill(it.rarity)}</div>
+    <div class="lbl">You receive (A)</div><input class="inp" id="sellPrice" inputmode="numeric" value="${TYPICAL[it.rarity] || 10}" style="font-size:22px;font-weight:700">
+    <div class="receipt" id="sellRc"></div>
+    <p style="font-size:11px;color:rgba(255,255,255,.28);margin-top:10px;font-style:italic">The house adds 15% on top for the buyer. You always get exactly what you list.</p>`;
+  const paint = () => {
+    const p = amountOf($('sellPrice').value);
+    $('sellRc').innerHTML = `<div><span>You receive</span><span>${fmt(p)} A</span></div><div><span>Buyer pays</span><span>${fmt(Math.ceil(p * 1.15))} A</span></div>`;
+    $('sellGo').disabled = !p;
   };
-
-  c.innerHTML = `
-    <div class="sec-title">Your Cosmetics <span style="text-transform:none;letter-spacing:0;color:rgba(255,255,255,.18)">${cosmeticsCache.length} owned</span></div>
-    ${order.filter(cat => byCategory[cat]?.length).map(cat => `
-      <div class="cos-section">${CATEGORY_LABELS[cat]} <span style="color:rgba(255,255,255,.15)">${byCategory[cat].length}</span></div>
-      <div class="owned-grid">${byCategory[cat].map(cardHTML).join('')}</div>
-    `).join('')}
-    <div class="empty-note" style="padding-top:6px">Equip, unequip, or list an item for sale on the Player Shop.</div>`;
+  openSheet('shSell');
+  $('sellPrice').addEventListener('input', paint); paint();
+  $('sellGo').onclick = async () => {
+    const p = amountOf($('sellPrice').value); if (!p) return;
+    $('sellGo').disabled = true;
+    try {
+      await api.post('/shop/listings', { user_cosmetic_id: it.user_cosmetic_id, price_a: p });
+      closeSheets(); toast(`Listed ${it.name} for ${fmt(p)} A`, 'gold');
+    } catch (err) { toast(err.message || 'Failed to list', 'red'); $('sellGo').disabled = false; }
+  };
 }
 
-async function renderHistory(c) {
-  c.innerHTML = `<div class="empty-note">Loading…</div>`;
-  try {
-    if (!historyCache) historyCache = (await api.get('/games/history?limit=30')).results;
-  } catch (err) {
-    c.innerHTML = `<div class="empty-note">Failed to load history.</div>`;
-    return;
-  }
-
-  if (historyCache.length === 0) {
-    c.innerHTML = `<div class="sec-title">Provably Fair Game History</div><div class="empty-note">No games played yet.</div>`;
-    return;
-  }
-
-  c.innerHTML = `
-    <div class="sec-title">Provably Fair Game History</div>
-    <div style="font-size:11.5px;color:rgba(255,255,255,.25);font-style:italic;margin-bottom:14px;line-height:1.65">Every game outcome is tied to a server seed revealed after the round ends. Verify any result independently.</div>
-    ${historyCache.map(h => `<div class="hist-row">
-      <span class="hist-game">${h.game}</span>
-      <span class="hist-seed">${h.server_hash.slice(0, 16)}…</span>
-      <span class="hist-res ${h.net >= 0 ? 'w' : 'l'}">${h.net >= 0 ? '+' : ''}${Number(h.net).toLocaleString()} CC</span>
-      <button class="hist-verify" data-verify="${h.id}">Verify</button>
-    </div>`).join('')}`;
-}
-
-function bindEvents(app) {
-  document.getElementById('nav-home').addEventListener('click', () => window.__navigate('home'));
-  document.getElementById('nav-games').addEventListener('click', () => window.__navigate('games'));
-  document.getElementById('nav-shop').addEventListener('click', () => window.__navigate('shop'));
-
-  document.querySelectorAll('.tabs .tb').forEach((btn, i) => {
-    btn.addEventListener('click', async () => {
-      curTab = i;
-      document.querySelectorAll('.tabs .tb').forEach((t, j) => t.classList.toggle('on', j === i));
-      await renderTab();
-    });
-  });
-
-  app.addEventListener('click', async (e) => {
-    if (e.target.id === 'logoutBtn') {
-      try { await api.post('/auth/logout'); } catch (_) {}
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      clearUser();
-      return window.__navigate('landing');
-    }
-
-    if (e.target.id === 'editProfileBtn') {
-      return showToast('Profile editing is coming soon', 'gold');
-    }
-
-    if (e.target.id === 'myListingsBtn') {
-      return window.__navigate('shop', { filterMine: true });
-    }
-
-    const equipBtn = e.target.closest('[data-equip]');
-    if (equipBtn) {
-      const id = equipBtn.dataset.equip;
-      const isEquipped = equipBtn.dataset.state === 'true';
-      equipBtn.disabled = true;
-      try {
-        await api.post(`/cosmetics/${id}/${isEquipped ? 'unequip' : 'equip'}`);
-        showToast(isEquipped ? 'Unequipped' : 'Equipped!', 'green');
-        await renderCosmetics(document.getElementById('tcontent'));
-        renderHero(); // re-fetch isn't needed for equip state, but hero shows equipped cosmetics — reload it
-        loadProfile();
-      } catch (err) {
-        showToast(err.message || 'Failed to update', 'red');
-        equipBtn.disabled = false;
-      }
-      return;
-    }
-
-    const listBtn = e.target.closest('[data-list]');
-    if (listBtn) {
-      const id = listBtn.dataset.list;
-      listingPriceFor = listingPriceFor === id ? null : id;
-      return renderCosmetics(document.getElementById('tcontent'));
-    }
-
-    const confirmBtn = e.target.closest('[data-confirm-list]');
-    if (confirmBtn) {
-      const id = confirmBtn.dataset.confirmList;
-      const price = parseInt(document.getElementById('priceInput').value) || 0;
-      if (price <= 0) return showToast('Enter a price first', 'red');
-      confirmBtn.disabled = true; confirmBtn.textContent = '…';
-      try {
-        await api.post('/shop/listings', { user_cosmetic_id: id, price_a: price });
-        showToast('Listed on the Player Shop!', 'gold');
-        listingPriceFor = null;
-        await renderCosmetics(document.getElementById('tcontent'));
-      } catch (err) {
-        showToast(err.message || 'Failed to list', 'red');
-        confirmBtn.disabled = false; confirmBtn.textContent = 'Confirm';
-      }
-      return;
-    }
-
-    const claimBtn = e.target.closest('[data-claim]');
-    if (claimBtn) {
-      const id = claimBtn.dataset.claim;
-      claimBtn.disabled = true; claimBtn.textContent = '…';
-      try {
-        const res = await api.post(`/challenges/${id}/claim`);
-        updateBalance({ a_balance: res.a_balance });
-        showToast(`+${res.reward_a} A claimed!`, 'gold');
-        challengesCache = null;
-        await renderAchievements(document.getElementById('tcontent'));
-      } catch (err) {
-        showToast(err.message || 'Failed to claim', 'red');
-        claimBtn.disabled = false; claimBtn.textContent = `Claim`;
-      }
-      return;
-    }
-
-    const verifyBtn = e.target.closest('[data-verify]');
-    if (verifyBtn) {
-      const row = historyCache.find(h => h.id === verifyBtn.dataset.verify);
-      if (row) showToast(`Hash: ${row.server_hash.slice(0, 24)}… · nonce ${row.nonce}`, 'green');
-    }
-  });
+// ── fair history ────────────────────────────────────────────────────────────
+function fairHistory(c) {
+  const H0 = cache.history || [];
+  c.innerHTML = H0.length ? `<div class="sec first">Fair history <span>last ${H0.length} rounds</span></div>
+    ${H0.map((h, i) => {
+      const net = Number(h.net) || 0;
+      return `<div class="fh"><div class="fh-t"><span class="fh-g">${esc(gameName(h.game))}</span>
+        <span class="fh-r" style="color:${net > 0 ? 'var(--em)' : net < 0 ? 'var(--red)' : 'rgba(255,255,255,.5)'}">${net > 0 ? '+' : net < 0 ? '−' : ''}${fmt(Math.abs(net))} CC</span></div>
+        <div class="fh-m">${timeAgo(h.created_at)} · staked ${fmt(h.bet_amount)} CC · nonce ${esc(h.nonce)}</div>
+        <div class="fh-h"><span class="hash">${esc(h.server_hash || '—')}</span><button class="cp" data-h="${i}">Copy hash</button></div></div>`;
+    }).join('')}
+    <div style="font-size:11px;color:rgba(255,255,255,.22);padding:8px 4px;font-style:italic">Every round is committed to a hash before it starts. Verify any of them yourself.</div>`
+    : '<div class="empty">No rounds yet. Go lose some money.</div>';
+  c.querySelectorAll('[data-h]').forEach((b) => b.addEventListener('click', () => {
+    const t = H0[Number(b.dataset.h)].server_hash || '';
+    navigator.clipboard?.writeText(t).catch(() => {});
+    b.textContent = 'Copied'; b.classList.add('ok');
+    setTimeout(() => { b.textContent = 'Copy hash'; b.classList.remove('ok'); }, 1400);
+  }));
 }

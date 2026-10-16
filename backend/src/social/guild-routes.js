@@ -47,7 +47,7 @@ module.exports = function makeGuildRouter(io) {
     try {
       const r = await query(
         `SELECT g.id, g.name, g.tag, g.description, g.is_private, g.fund_balance,
-                g.unlocked, g.owner_id, COUNT(gm.user_id)::int AS member_count
+                g.unlocked, g.owner_id, g.icon, g.icon_bg, COUNT(gm.user_id)::int AS member_count
          FROM guilds g LEFT JOIN guild_members gm ON gm.guild_id = g.id
          GROUP BY g.id
          ORDER BY g.fund_balance DESC, member_count DESC, g.created_at ASC`
@@ -57,6 +57,7 @@ module.exports = function makeGuildRouter(io) {
           id: g.id, name: g.name, tag: g.tag, description: g.description,
           is_private: g.is_private, fund_balance: Number(g.fund_balance),
           unlocked: g.unlocked, owner_id: g.owner_id, member_count: g.member_count,
+          icon: g.icon, icon_bg: g.icon_bg,
           progress_pct: pct(g.fund_balance),
         })),
       });
@@ -74,6 +75,7 @@ module.exports = function makeGuildRouter(io) {
       res.json({
         guild: {
           id: g.id, name: g.name, tag: g.tag, unlocked: g.unlocked,
+          icon: g.icon, icon_bg: g.icon_bg,
           fund_balance: Number(g.fund_balance), progress_pct: pct(g.fund_balance),
           is_owner: g.owner_id === req.user.userId,
         },
@@ -149,6 +151,7 @@ module.exports = function makeGuildRouter(io) {
           id: g.id, name: g.name, tag: g.tag, description: g.description,
           is_private: g.is_private, fund_balance: Number(g.fund_balance),
           unlocked: g.unlocked, owner_id: g.owner_id, progress_pct: pct(g.fund_balance),
+          icon: g.icon, icon_bg: g.icon_bg,
           members, member_count: members.length,
           is_member: isMember, is_owner: isOwner, pending_count: pendingCount,
         },
@@ -529,7 +532,7 @@ module.exports = function makeGuildRouter(io) {
   // ── PATCH /guilds/:id — owner edits name/tag/description/privacy ────────────
   router.patch('/guilds/:id', requireAuth, async (req, res) => {
     const guildId = req.params.id;
-    const { name, tag, description, is_private } = req.body || {};
+    const { name, tag, description, is_private, icon, icon_bg } = req.body || {};
     try {
       const g = await query(`SELECT owner_id FROM guilds WHERE id = $1`, [guildId]);
       if (!g.rows.length) return res.status(404).json({ error: 'Guild not found' });
@@ -537,6 +540,8 @@ module.exports = function makeGuildRouter(io) {
 
       if (name !== undefined && (!name || String(name).length > 64)) return res.status(400).json({ error: 'Name must be 1–64 chars' });
       if (tag !== undefined && (!tag || String(tag).length > 8)) return res.status(400).json({ error: 'Tag must be 1–8 chars' });
+      if (icon !== undefined && (!icon || [...String(icon)].length > 4 || String(icon).length > 16)) return res.status(400).json({ error: 'Pick a single emoji for the icon' });
+      if (icon_bg !== undefined && !/^#[0-9a-fA-F]{6}$/.test(String(icon_bg))) return res.status(400).json({ error: 'Icon colour must be a #RRGGBB hex' });
 
       const sets = [];
       const vals = [];
@@ -545,12 +550,14 @@ module.exports = function makeGuildRouter(io) {
       if (tag !== undefined)         { sets.push(`tag = $${i++}`);         vals.push(tag); }
       if (description !== undefined) { sets.push(`description = $${i++}`);  vals.push(description || null); }
       if (is_private !== undefined)  { sets.push(`is_private = $${i++}`);   vals.push(!!is_private); }
+      if (icon !== undefined)        { sets.push(`icon = $${i++}`);         vals.push(String(icon)); }
+      if (icon_bg !== undefined)     { sets.push(`icon_bg = $${i++}`);      vals.push(String(icon_bg)); }
       if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
 
       vals.push(guildId);
       const upd = await query(
         `UPDATE guilds SET ${sets.join(', ')} WHERE id = $${i}
-         RETURNING id, name, tag, description, is_private`,
+         RETURNING id, name, tag, description, is_private, icon, icon_bg`,
         vals
       );
       res.json({ guild: upd.rows[0] });

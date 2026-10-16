@@ -140,6 +140,15 @@ function registerPvpHandlers(io, socket) {
     const isP2   = match.player2.userId === userId;
     if (!isP1 && !isP2) return;
 
+    // Uno is turn-based: only the current player may move, and their move resolves
+    // immediately (waiting for the other player meant every turn took the full 10s).
+    if (match.game === 'uno') {
+      if (match.state.currentPlayer !== userId) return;
+      if (isP1) match.move1 = move; else match.move2 = move;
+      clearTimeout(match.turnTimer);
+      return resolveMove(io, match);
+    }
+
     if (isP1) match.move1 = move; else match.move2 = move;
 
     // Notify opponent that the player has moved (without revealing the move)
@@ -573,13 +582,17 @@ function resolveUno(io, match) {
     hand.push(drawn);
     if (canPlay(drawn, state.discard[state.discard.length-1], state.currentColor)) {
       // Play it
+      hand.pop();
+      state.discard.push(drawn);
       applyCard(match, currId, drawn);
+      if (drawn.color === 'wild') state.currentColor = mostCommonColor(hand);
     } else {
       state.currentPlayer = oppId;
     }
   } else {
-    // move is a card index
-    const cardIdx = parseInt(move);
+    // move is a card index, or "index:color" for wild cards
+    const [idxPart, chosen] = String(move).split(':');
+    const cardIdx = parseInt(idxPart);
     if (isNaN(cardIdx) || !hand[cardIdx]) { state.currentPlayer = oppId; }
     else {
       const card = hand[cardIdx];
@@ -588,6 +601,9 @@ function resolveUno(io, match) {
         hand.splice(cardIdx, 1);
         state.discard.push(card);
         applyCard(match, currId, card);
+        if (card.color === 'wild') {
+          state.currentColor = ['red','blue','green','yellow'].includes(chosen) ? chosen : 'red';
+        }
       }
     }
   }
@@ -609,6 +625,12 @@ function resolveUno(io, match) {
 
   match.move1 = null; match.move2 = null;
   startTurnTimer(io, match);
+}
+
+function mostCommonColor(hand) {
+  const n = { red: 0, blue: 0, green: 0, yellow: 0 };
+  hand.forEach((c) => { if (n[c.color] !== undefined) n[c.color]++; });
+  return Object.keys(n).sort((a, b) => n[b] - n[a])[0];
 }
 
 function applyCard(match, playerId, card) {

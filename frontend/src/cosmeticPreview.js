@@ -337,11 +337,13 @@ const PREVIEW_FRAME_SIZE = 42;
  * they're always faithful to each other, just scaled.
  * @param {{rarity:string, preview_key:string}|null} frame
  * @param {number} size — rendered width/height in px
+ * @param {string} [inner] — what sits inside the avatar circle (defaults to 👤)
  */
-export function renderAvatarFrame(frame, size) {
+export function renderAvatarFrame(frame, size, inner) {
   const sz = Math.round(size);
+  const face = inner ?? '👤';
   if (!frame) {
-    return `<div style="width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:${r(sz*0.4375)}px">👤</div>`;
+    return `<div style="width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font-size:${r(sz*0.4)}px;flex-shrink:0">${face}</div>`;
   }
   const s = sz / FRAME_REF;
   const avSize = r(sz * AV_RATIO);
@@ -356,9 +358,9 @@ export function renderAvatarFrame(frame, size) {
     deco = `<div class="${className}" style="position:absolute;inset:${r(6*s)}px;border-radius:50%;border:${r(2.5*s)}px solid ${color};opacity:.85;box-shadow:${boxShadow}"></div>
       <div style="position:absolute;bottom:${r(-3*s)}px;right:${r(-3*s)}px;width:${badgeSize}px;height:${badgeSize}px;border-radius:50%;background:#0a0a0a;border:${r(1.5*s)}px solid ${color};display:flex;align-items:center;justify-content:center;font-size:${r(badgeSize*0.55)}px">${icon}</div>`;
   }
-  return `<div style="position:relative;width:${sz}px;height:${sz}px;display:flex;align-items:center;justify-content:center;${clip ? 'overflow:hidden;border-radius:50%;' : ''}">
+  return `<div style="position:relative;width:${sz}px;height:${sz}px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${clip ? 'overflow:hidden;border-radius:50%;' : ''}">
     ${deco}
-    <div style="width:${avSize}px;height:${avSize}px;border-radius:50%;background:#111;display:flex;align-items:center;justify-content:center;font-size:${r(avSize*0.42)}px;position:relative;z-index:2">👤</div>
+    <div style="width:${avSize}px;height:${avSize}px;border-radius:50%;background:#111;display:flex;align-items:center;justify-content:center;font-size:${r(avSize*0.42)}px;position:relative;z-index:2">${face}</div>
   </div>`;
 }
 

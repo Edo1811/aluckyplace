@@ -1,202 +1,100 @@
 import socket from '../socket.js';
-import { store, updateBalance } from '../store.js';
+import { $, fmt, toast, later } from '../ui/core.js';
+import { gameShell, on, syncBalance } from '../games/shell.js';
+
+// Server: 5 mines on a 5×5 grid. Multipliers by number of safe picks.
+const BOMBS = 5;
+const MULT = [1, 1.24, 1.56, 2.00, 2.58, 3.39, 4.53, 6.14, 8.51, 12.0, 17.5, 26.3, 40.9, 66.4, 113.9, 208.9, 417.7, 940, 2506, 8769, 52602];
 
 export function renderMines(app) {
-  app.innerHTML = `
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/playfair-display@5/index.css">
-    <style>
-      *, *::before, *::after{margin:0;padding:0;box-sizing:border-box}
-      body{background:#050505}
-      .mp{display:flex;flex-direction:column;height:100vh;background:radial-gradient(ellipse at 50% 50%,#0a1f0a 0%,#050505 70%);font-family:'Playfair Display',Georgia,serif;color:#fff}
-      .topbar{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0}
-      .back{padding:6px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:8px;color:rgba(255,255,255,.5);font-size:12px;cursor:pointer;font-family:'Playfair Display',Georgia,serif}
-      .game-title{font-size:16px;font-weight:700}
-      .bal-chip{margin-left:auto;font-size:12px;color:rgba(255,255,255,.4)}
-      .bal-chip span{color:#10b981;font-weight:700}
-      .main{flex:1;display:flex;align-items:center;justify-content:center;gap:24px;padding:20px;flex-wrap:wrap}
-      .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;width:min(320px,80vw)}
-      .tile{aspect-ratio:1;border-radius:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;transition:all .15s;user-select:none}
-      .tile:hover:not(.revealed):not(.bomb):not(.locked){background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.2);transform:scale(1.04)}
-      .tile.revealed{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35);cursor:default}
-      .tile.bomb{background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.4);cursor:default;animation:shake .3s ease}
-      .tile.hit-bomb{background:rgba(239,68,68,.3);border-color:#ef4444}
-      .tile.locked{cursor:default;opacity:.6}
-      @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
-      .side{display:flex;flex-direction:column;gap:14px;width:180px}
-      .mult-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px;text-align:center}
-      .mult-label{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.25);margin-bottom:6px}
-      .mult-val{font-size:36px;font-weight:700;color:#10b981;line-height:1;transition:all .3s}
-      .mult-pot{font-size:12px;color:rgba(255,255,255,.3);margin-top:4px}
-      .bet-inp{width:100%;padding:10px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-size:15px;font-weight:700;font-family:'Playfair Display',Georgia,serif;outline:none;text-align:center}
-      .bet-inp:focus{border-color:rgba(16,185,129,.4)}
-      .sbtn{width:100%;padding:12px;border:none;border-radius:9px;font-size:14px;font-weight:700;font-family:'Playfair Display',Georgia,serif;cursor:pointer;transition:all .15s}
-      .sbtn.start{background:#10b981;color:#fff}
-      .sbtn.start:hover{background:#0ea472}
-      .sbtn.cash{background:#D4AF37;color:#000}
-      .sbtn.cash:hover{background:#c9a42e}
-      .sbtn:disabled{background:rgba(255,255,255,.08);color:rgba(255,255,255,.25);cursor:not-allowed}
-      .status{font-size:11.5px;color:rgba(255,255,255,.35);font-style:italic;text-align:center;min-height:18px}
-      .picks-label{font-size:11px;color:rgba(255,255,255,.25);text-align:center}
-    </style>
-    <div class="mp">
-      <div class="topbar">
-        <button class="back" id="backBtn">← Games</button>
-        <span class="game-title">Mines</span>
-        <span class="bal-chip">Balance: <span id="balDisplay">${Number(store.ccBalance).toLocaleString()}</span> CC</span>
+  const shell = gameShell(app, {
+    id: 'mines', title: 'Mines',
+    stage: `<div class="pad">
+      <div class="statrow">
+        <div><div class="stat-v" id="mnMul">1.00×</div><div class="stat-l">Multiplier</div></div>
+        <div><div class="stat-v" id="mnPay">0</div><div class="stat-l">Cash out value</div></div>
+        <div><div class="stat-v" id="mnNext">1.24×</div><div class="stat-l">Next tile</div></div>
       </div>
-      <div class="main">
-        <div class="grid" id="grid"></div>
-        <div class="side">
-          <div class="mult-card">
-            <div class="mult-label">Multiplier</div>
-            <div class="mult-val" id="multVal">—</div>
-            <div class="mult-pot" id="multPot">Pick a tile to start</div>
-          </div>
-          <input class="bet-inp" id="betInput" type="number" min="10" value="100" placeholder="Bet CC">
-          <button class="sbtn start" id="startBtn">Start Game</button>
-          <button class="sbtn cash"  id="cashBtn" disabled>Cash Out</button>
-          <div class="status" id="statusMsg">Place a bet to begin.</div>
-          <div class="picks-label" id="picksLabel"></div>
-        </div>
-      </div>
-    </div>
-  `;
+      <div class="mgrid" id="mnGrid"></div>
+      <div class="ghint">${BOMBS} mines hidden · every safe tile pays more</div>
+    </div>`,
+  });
 
-  buildGrid();
-  bindUI();
-  bindSocket();
-}
+  let bet = 0, picks = 0, busy = false, done = true, pending = -1;
 
-let gameActive = false, picks = 0, currentBet = 0;
+  const tile = (i) => $('mnGrid')?.children[i];
+  const hud = () => {
+    $('mnMul').textContent = `${(picks ? MULT[picks] : 1).toFixed(2)}×`;
+    $('mnPay').textContent = picks ? fmt(Math.floor(bet * MULT[picks])) : '0';
+    $('mnNext').textContent = MULT[picks + 1] ? `${MULT[picks + 1].toFixed(2)}×` : '—';
+    const c = $('mnCash'); if (c) { c.disabled = !picks || done || busy; c.textContent = picks ? `Cash out ${fmt(Math.floor(bet * MULT[picks]))}` : 'Cash out'; }
+  };
 
-function buildGrid() {
-  const grid = document.getElementById('grid');
-  grid.innerHTML = '';
-  for (let i = 0; i < 25; i++) {
-    const tile = document.createElement('div');
-    tile.className = 'tile locked';
-    tile.dataset.idx = i;
-    tile.textContent = '▪';
-    grid.appendChild(tile);
+  function board() {
+    $('mnGrid').innerHTML = Array.from({ length: 25 }, (_, i) => `<button class="mtile" data-i="${i}" aria-label="Tile ${i + 1}"></button>`).join('');
+    $('mnGrid').querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => pick(Number(b.dataset.i))));
+    shell.actions('<button class="ga ga-em" id="mnCash" disabled>Cash out</button>');
+    $('mnCash').onclick = cashout;
   }
-}
-
-function resetGrid() {
-  document.querySelectorAll('.tile').forEach(t => {
-    t.className = 'tile locked';
-    t.textContent = '▪';
-  });
-}
-
-function unlockGrid() {
-  document.querySelectorAll('.tile').forEach(t => {
-    t.className = 'tile';
-    t.textContent = '▪';
-  });
-}
-
-function bindUI() {
-  document.getElementById('backBtn').addEventListener('click', () => {
-    socket.off('mines:board'); socket.off('mines:safe');
-    socket.off('mines:bomb'); socket.off('mines:cashout:confirm'); socket.off('mines:error');
-    window.__navigate('games');
-  });
-
-  document.getElementById('startBtn').addEventListener('click', () => {
-    const bet = Math.floor(Number(document.getElementById('betInput').value));
-    if (bet < 10) { setStatus('Minimum bet is 10 CC'); return; }
-    currentBet = bet;
-    picks = 0;
-    socket.emit('mines:start', { bet });
-    document.getElementById('startBtn').disabled = true;
-    document.getElementById('betInput').disabled = true;
-    setStatus('Starting…');
-  });
-
-  document.getElementById('cashBtn').addEventListener('click', () => {
-    if (!gameActive) return;
+  function pick(i) {
+    if (done || busy) return;
+    const t = tile(i); if (!t || t.classList.contains('gem')) return;
+    busy = true; pending = i; t.style.opacity = '.55';
+    socket.emit('mines:pick', { tile_index: i });
+  }
+  function cashout() {
+    if (done || busy || !picks) return;
+    busy = true; hud();
     socket.emit('mines:cashout');
-    document.getElementById('cashBtn').disabled = true;
+  }
+  function reveal(bombs, hit) {
+    (bombs || []).forEach((b) => { const t = tile(b); if (t && b !== hit) { t.className = 'mtile boom dim'; t.textContent = '✕'; } });
+    $('mnGrid').querySelectorAll('.mtile:not(.gem):not(.boom)').forEach((t) => { t.classList.add('dim'); });
+  }
+  function start(b) {
+    bet = b; picks = 0; done = false; busy = true;
+    board(); hud();
+    socket.emit('mines:start', { bet: b });
+    shell.show('scPlay');
+  }
+  const again = () => start(bet);
+  const change = () => shell.bet({ onPlace: start });
+
+  on(socket, {
+    'mines:board': ({ cc_balance }) => { busy = false; syncBalance(cc_balance); hud(); },
+    'mines:resume': ({ bet: b, picks: n, revealed }) => {
+      bet = Number(b); picks = Number(n) || 0; busy = false; done = false;
+      board();
+      (revealed || []).forEach((i) => { const t = tile(i); if (t) { t.className = 'mtile gem'; t.textContent = '◆'; } });
+      hud(); shell.show('scPlay');
+      toast('Picked up your unfinished board', 'amber');
+    },
+    'mines:safe': ({ tile_index, multiplier }) => {
+      busy = false; picks++;
+      const t = tile(tile_index); if (t) { t.style.opacity = ''; t.className = 'mtile gem'; t.textContent = '◆'; }
+      if (multiplier) MULT[picks] = Number(multiplier);
+      hud();
+    },
+    'mines:bomb': ({ tile_index, bomb_positions, seed, cc_balance }) => {
+      busy = false; done = true; syncBalance(cc_balance);
+      const t = tile(tile_index); if (t) { t.style.opacity = ''; t.className = 'mtile boom'; t.textContent = '✕'; }
+      reveal(bomb_positions, tile_index); hud();
+      if ('vibrate' in navigator) navigator.vibrate(80);
+      later(1500, () => shell.result({ net: -bet, sub: `Hit a mine after ${picks} safe pick${picks === 1 ? '' : 's'}`, seed, again, change }));
+    },
+    'mines:cashout:confirm': ({ payout, picks: n, seed, bomb_positions, cc_balance }) => {
+      busy = false; done = true; syncBalance(cc_balance);
+      reveal(bomb_positions); hud();
+      later(900, () => shell.result({ net: Number(payout) - bet, sub: `Cashed out at ${MULT[n || picks].toFixed(2)}× after ${n || picks} picks`, seed, again, change }));
+    },
+    'mines:error': ({ message }) => {
+      busy = false;
+      if (pending >= 0) { const t = tile(pending); if (t) t.style.opacity = ''; pending = -1; }
+      toast(message || 'Mines error', 'red');
+      if (!picks && /balance|minimum|bet/i.test(message || '')) { done = true; change(); }
+      hud();
+    },
   });
 
-  document.getElementById('grid').addEventListener('click', e => {
-    if (!gameActive) return;
-    const tile = e.target.closest('.tile');
-    if (!tile || tile.classList.contains('revealed') || tile.classList.contains('bomb')) return;
-    socket.emit('mines:pick', { tile_index: parseInt(tile.dataset.idx) });
-  });
+  change();
 }
-
-function bindSocket() {
-  socket.on('mines:board', ({ cc_balance }) => {
-    gameActive = true;
-    unlockGrid();
-    updateBalance({ cc_balance });
-    document.getElementById('balDisplay').textContent = Number(cc_balance).toLocaleString();
-    document.getElementById('multVal').textContent = '1.00×';
-    document.getElementById('multPot').textContent = 'Pick a tile!';
-    document.getElementById('picksLabel').textContent = '0 safe picks';
-    setStatus('Click a tile. 5 bombs hidden.');
-  });
-
-  socket.on('mines:safe', ({ tile_index, multiplier, potential_payout }) => {
-    picks++;
-    const tile = document.querySelector(`.tile[data-idx="${tile_index}"]`);
-    if (tile) { tile.className = 'tile revealed'; tile.textContent = '💎'; }
-    document.getElementById('multVal').textContent = multiplier.toFixed(2) + '×';
-    document.getElementById('multPot').textContent = `${potential_payout.toLocaleString()} CC if cashed`;
-    document.getElementById('picksLabel').textContent = `${picks} safe pick${picks > 1 ? 's' : ''}`;
-    document.getElementById('cashBtn').disabled = false;
-    setStatus(`Safe! Keep going or cash out.`);
-  });
-
-  socket.on('mines:bomb', ({ tile_index, bomb_positions, cc_balance }) => {
-    gameActive = false;
-    const hit = document.querySelector(`.tile[data-idx="${tile_index}"]`);
-    if (hit) { hit.className = 'tile hit-bomb'; hit.textContent = '💣'; }
-    setTimeout(() => {
-      bomb_positions.forEach(idx => {
-        if (idx === tile_index) return;
-        const t = document.querySelector(`.tile[data-idx="${idx}"]`);
-        if (t) { t.className = 'tile bomb'; t.textContent = '💣'; }
-      });
-    }, 120);
-    updateBalance({ cc_balance });
-    document.getElementById('balDisplay').textContent = Number(cc_balance).toLocaleString();
-    document.getElementById('cashBtn').disabled = true;
-    document.getElementById('multVal').textContent = '💥';
-    document.getElementById('multVal').style.color = '#ef4444';
-    setStatus(`Boom! Lost ${currentBet.toLocaleString()} CC.`);
-    setTimeout(resetGame, 2500);
-  });
-
-  socket.on('mines:cashout:confirm', ({ payout, picks: p, cc_balance }) => {
-    gameActive = false;
-    updateBalance({ cc_balance });
-    document.getElementById('balDisplay').textContent = Number(cc_balance).toLocaleString();
-    document.getElementById('cashBtn').disabled = true;
-    document.getElementById('multVal').style.color = '#10b981';
-    setStatus(`Cashed out! +${(payout - currentBet).toLocaleString()} CC after ${p} safe picks 🎉`);
-    setTimeout(resetGame, 2000);
-  });
-
-  socket.on('mines:error', ({ message }) => {
-    setStatus(message);
-    resetGame();
-  });
-}
-
-function resetGame() {
-  gameActive = false; picks = 0;
-  resetGrid();
-  document.getElementById('startBtn').disabled = false;
-  document.getElementById('betInput').disabled = false;
-  document.getElementById('cashBtn').disabled  = true;
-  document.getElementById('multVal').textContent = '—';
-  document.getElementById('multVal').style.color = '#10b981';
-  document.getElementById('multPot').textContent = 'Pick a tile to start';
-  document.getElementById('picksLabel').textContent = '';
-  setStatus('Place a bet to begin.');
-}
-
-function setStatus(msg) { const el = document.getElementById('statusMsg'); if (el) el.textContent = msg; }

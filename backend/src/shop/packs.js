@@ -57,7 +57,7 @@ async function openPack(userId, packType) {
     const rarity = rollRarity(PACK_ODDS[packType]);
 
     const itemRes = await client.query(
-      `SELECT id, name, category, rarity FROM cosmetics_catalog
+      `SELECT id, name, category, rarity, preview_key FROM cosmetics_catalog
        WHERE rarity = $1 AND is_obtainable = TRUE
        ORDER BY random() LIMIT 1`,
       [rarity]
