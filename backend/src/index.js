@@ -131,6 +131,19 @@ async function ensureSchema() {
   try {
     await query(`ALTER TABLE guilds ADD COLUMN IF NOT EXISTS icon    VARCHAR(16) NOT NULL DEFAULT '🏰'`);
     await query(`ALTER TABLE guilds ADD COLUMN IF NOT EXISTS icon_bg VARCHAR(9)  NOT NULL DEFAULT '#10b981'`);
+    // progression stats (see migrations/004_user_stats.sql)
+    await query(`CREATE TABLE IF NOT EXISTS user_stats (
+      user_id             UUID        PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      total_games         INT         NOT NULL DEFAULT 0,
+      total_wins          INT         NOT NULL DEFAULT 0,
+      biggest_win         BIGINT      NOT NULL DEFAULT 0,
+      biggest_loss        BIGINT      NOT NULL DEFAULT 0,
+      bankruptcy_count    INT         NOT NULL DEFAULT 0,
+      total_pvp_wins      INT         NOT NULL DEFAULT 0,
+      pvp_win_streak      INT         NOT NULL DEFAULT 0,
+      best_pvp_win_streak INT         NOT NULL DEFAULT 0,
+      updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
     // admin panel: roles, bans, audit log
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin   BOOLEAN NOT NULL DEFAULT FALSE`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at  TIMESTAMPTZ`);
