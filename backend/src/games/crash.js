@@ -67,6 +67,13 @@ function startActivePhase() {
     const mult = currentMultiplier();
     if (io_ref) io_ref.to('crash').emit('crash:tick', { multiplier: parseFloat(mult.toFixed(2)) });
 
+    // Auto cash-outs: pay exactly at the target once the curve has passed it,
+    // as long as the round's crash point is at or above the target.
+    const reach = Math.min(mult, gameState.crashPoint);
+    for (const [userId, bet] of Object.entries(gameState.bets)) {
+      if (!bet.cashedOut && bet.autoCashout && bet.autoCashout <= reach) cashOut(userId, bet.autoCashout, 'auto');
+    }
+
     if (mult >= gameState.crashPoint) {
       clearInterval(gameInterval);
       endRound();
@@ -117,6 +124,48 @@ async function endRound() {
   setTimeout(startBettingPhase, 2000);
 }
 
+// Single cash-out path for manual and auto. Marks the bet synchronously so a
+// bet can never be paid twice or also be recorded as a loss.
+async function cashOut(userId, mult, source) {
+  const bet = gameState.bets[userId];
+  if (!bet || bet.cashedOut) return;
+  const roundId = gameState.roundId;
+  const payout = Math.floor(bet.amount * mult);
+  bet.cashedOut = true;
+  bet.cashoutMultiplier = mult;
+  const m = parseFloat(mult.toFixed(2));
+
+  let client;
+  try {
+    client = await getClient();
+    await client.query('BEGIN');
+    const credit = await client.query(
+      `UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2 RETURNING cc_balance`,
+      [payout, userId]
+    );
+    await recordResult(client, {
+      userId, game: 'crash', betAmount: bet.amount, payoutAmount: payout,
+      seed: gameState.seed, hash: gameState.hash, nonce: 0,
+      extra: { cashout_multiplier: m, crash_point: gameState.crashPoint, cashed_out: true, auto: source === 'auto' },
+    });
+    await recordSoloResult(client, {
+      userId, game: 'crash', betAmount: bet.amount, payoutAmount: payout,
+      ccBalanceAfter: credit.rows[0].cc_balance,
+      extra: { cashout_multiplier: m },
+    });
+    await client.query('COMMIT');
+    if (io_ref) {
+      io_ref.to(`user:${userId}`).emit('crash:cashout:confirm', { round_id: roundId, multiplier: m, payout, auto: source === 'auto', cc_balance: credit.rows[0].cc_balance });
+      io_ref.to('crash').emit('crash:cashout:broadcast', { username: bet.username, multiplier: m, payout });
+    }
+  } catch (e) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('[crash] cashout error:', e.message);
+  } finally {
+    if (client) client.release();
+  }
+}
+
 function registerCrashHandlers(io, socket) {
   if (!io_ref) {
     io_ref = io;
@@ -143,7 +192,7 @@ function registerCrashHandlers(io, socket) {
   sendState();
   socket.on('crash:sync', sendState);
 
-  socket.on('crash:bet', async ({ round_id, amount }) => {
+  socket.on('crash:bet', async ({ round_id, amount, auto_cashout }) => {
     if (!socket.user) return;
     if (gameState.phase !== 'betting') return socket.emit('crash:error', { message: 'Betting window closed' });
     if (round_id !== gameState.roundId) return;
@@ -153,6 +202,11 @@ function registerCrashHandlers(io, socket) {
     const bet      = Math.floor(Number(amount));
     if (!Number.isFinite(bet) || bet < 10) return socket.emit('crash:error', { message: 'Minimum bet is 10 CC' });
     if (gameState.bets[userId]) return socket.emit('crash:error', { message: 'Already bet this round' });
+    let autoCashout = null;
+    if (auto_cashout !== undefined && auto_cashout !== null && auto_cashout !== '') {
+      autoCashout = Math.floor(Number(auto_cashout) * 100) / 100;
+      if (!Number.isFinite(autoCashout) || autoCashout < 1.01 || autoCashout > 1000) return socket.emit('crash:error', { message: 'Auto cash-out must be between 1.01× and 1000×' });
+    }
 
     try {
       const result = await query(
@@ -161,54 +215,18 @@ function registerCrashHandlers(io, socket) {
       );
       if (result.rows.length === 0) return socket.emit('crash:error', { message: 'Insufficient balance' });
 
-      gameState.bets[userId] = { amount: bet, username, cashedOut: false, cashoutMultiplier: null };
-      socket.emit('crash:bet:confirm', { round_id, amount: bet, cc_balance: result.rows[0].cc_balance });
+      gameState.bets[userId] = { amount: bet, username, cashedOut: false, cashoutMultiplier: null, autoCashout };
+      socket.emit('crash:bet:confirm', { round_id, amount: bet, auto_cashout: autoCashout, cc_balance: result.rows[0].cc_balance });
     } catch (e) { socket.emit('crash:error', { message: 'Server error' }); }
   });
 
-  socket.on('crash:cashout', async ({ round_id }) => {
+  socket.on('crash:cashout', ({ round_id }) => {
     if (!socket.user) return;
     if (gameState.phase !== 'active') return;
     if (round_id !== gameState.roundId) return;
-
-    const userId = socket.user.userId;
-    const bet    = gameState.bets[userId];
-    if (!bet || bet.cashedOut) return;
-
-    const mult   = currentMultiplier();
-    const payout = Math.floor(bet.amount * mult);
-    bet.cashedOut = true;
-    bet.cashoutMultiplier = mult;
-
-    try {
-      const client = await getClient();
-      try {
-        await client.query('BEGIN');
-        const credit = await client.query(
-          `UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2 RETURNING cc_balance`,
-          [payout, userId]
-        );
-        await recordResult(client, {
-          userId, game: 'crash', betAmount: bet.amount, payoutAmount: payout,
-          seed: gameState.seed, hash: gameState.hash, nonce: 0,
-          extra: { cashout_multiplier: parseFloat(mult.toFixed(2)), crash_point: gameState.crashPoint, cashed_out: true },
-        });
-        await recordSoloResult(client, {
-          userId, game: 'crash', betAmount: bet.amount, payoutAmount: payout,
-          ccBalanceAfter: credit.rows[0].cc_balance,
-          extra: { cashout_multiplier: parseFloat(mult.toFixed(2)) },
-        });
-        await client.query('COMMIT');
-
-        socket.emit('crash:cashout:confirm', { round_id, multiplier: parseFloat(mult.toFixed(2)), payout, cc_balance: credit.rows[0].cc_balance });
-        io.to('crash').emit('crash:cashout:broadcast', { username: bet.username, multiplier: parseFloat(mult.toFixed(2)), payout });
-      } catch (e) {
-        await client.query('ROLLBACK').catch(() => {});
-        throw e;
-      } finally {
-        client.release();
-      }
-    } catch (e) { console.error('[crash] cashout error:', e.message); }
+    const mult = currentMultiplier();
+    if (mult >= gameState.crashPoint) return; // between the crash and the next tick — too late
+    cashOut(socket.user.userId, mult, 'manual');
   });
 
   socket.on('crash:chat', ({ text }) => {
