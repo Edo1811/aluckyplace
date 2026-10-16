@@ -77,7 +77,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'username and password are required' });
 
     const result = await query(
-      'SELECT id, username, password_hash, cc_balance, a_balance FROM users WHERE username = $1',
+      'SELECT id, username, password_hash, cc_balance, a_balance, is_admin, banned_at, ban_reason FROM users WHERE username = $1',
       [username]
     );
 
@@ -89,6 +89,9 @@ router.post('/login', async (req, res) => {
 
     if (!valid)
       return res.status(401).json({ error: 'Invalid username or password' });
+
+    if (user.banned_at)
+      return res.status(403).json({ error: user.ban_reason ? `This account is banned: ${user.ban_reason}` : 'This account is banned' });
 
     await query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
@@ -105,6 +108,7 @@ router.post('/login', async (req, res) => {
         username:   user.username,
         cc_balance: user.cc_balance,
         a_balance:  user.a_balance,
+        is_admin:   !!user.is_admin,
       },
     });
 
@@ -122,7 +126,7 @@ router.post('/logout', (_req, res) => res.json({ ok: true }));
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const result = await query(
-      `SELECT id, username, email, cc_balance, a_balance, created_at, last_login_at
+      `SELECT id, username, email, cc_balance, a_balance, created_at, last_login_at, is_admin
        FROM users WHERE id = $1`,
       [req.user.userId]
     );

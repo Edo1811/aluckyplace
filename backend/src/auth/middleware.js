@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { isBanned } = require('../admin/bans');
 
 // ── HTTP middleware ───────────────────────────────────────────────────────────
 // Usage: router.get('/protected', requireAuth, handler)
@@ -14,6 +15,7 @@ function requireAuth(req, res, next) {
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
+    if (isBanned(payload.userId)) return res.status(403).json({ error: 'Account banned' });
     req.user = { userId: payload.userId, username: payload.username };
     next();
   } catch (err) {

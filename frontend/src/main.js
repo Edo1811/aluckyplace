@@ -1,6 +1,6 @@
 import './ui/kit.css';
 import './socket.js';
-import { setUser } from './store.js';
+import { setUser, store } from './store.js';
 import { runLeave } from './ui/core.js';
 import { renderLanding }    from './pages/landing.js';
 import { renderHome }       from './pages/home.js';
@@ -22,6 +22,8 @@ import { renderShop }       from './pages/shop.js';
 import { renderProfile }    from './pages/profile.js';
 import { renderSocial }     from './pages/social.js';
 import { renderGuild }      from './pages/guild.js';
+import { renderAdmin }      from './pages/admin.js';
+import { api }              from './api.js';
 
 const app = document.getElementById('app');
 
@@ -34,6 +36,13 @@ if (token && userRaw) {
     const user = JSON.parse(userRaw);
     setUser(user);
     renderHome(app);
+    // Refresh the cached user (balances, admin flag) in the background.
+    api.get('/auth/me').then(({ user: fresh }) => {
+      const wasAdmin = !!store.user?.is_admin;
+      setUser({ ...user, ...fresh });
+      localStorage.setItem('user', JSON.stringify({ ...user, ...fresh }));
+      if (!!fresh.is_admin !== wasAdmin && document.querySelector('.dock') && currentPage) navigate(currentPage, currentData);
+    }).catch(() => {});
   } catch {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -46,8 +55,11 @@ if (token && userRaw) {
 // ── Router ─────────────────────────────────────────────────────────────────────
 // matchData is passed from matchmaking → game page
 let pendingMatchData = null;
+// last plain page (no live game/match state), for re-rendering after the user refresh
+let currentPage = 'home', currentData;
 
 export function navigate(page, data) {
+  if (!/^(pvp-|matchmaking-|game-)/.test(page)) { currentPage = page; currentData = data; }
   if (data && (page.startsWith('pvp-') || page.startsWith('matchmaking-'))) pendingMatchData = data;
 
   // Tear down the previous page (socket listeners, timers, sheets) and reset the shell.
@@ -95,6 +107,7 @@ export function navigate(page, data) {
     case 'profile':        return renderProfile(app, data);
     case 'social':         return renderSocial(app);
     case 'guild':          return renderGuild(app, data);
+    case 'admin':          return renderAdmin(app);
     default:               return renderHome(app);
   }
 }

@@ -114,8 +114,10 @@ const DOCK = [
   ['shop', 'Shop', '<path d="M4 4h10l-1.2 8H5.2L4 4z"/><path d="M6.5 4c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5"/><circle cx="6.5" cy="14.5" r="1"/><circle cx="11.5" cy="14.5" r="1"/>'],
   ['profile', 'Profile', '<circle cx="9" cy="6" r="3"/><path d="M2 16c0-3.87 3.13-7 7-7s7 3.13 7 7"/>'],
 ];
+const ADMIN_ITEM = ['admin', 'Admin', '<path d="M9 1.8l6 2.4v4.3c0 3.6-2.5 6.6-6 7.7-3.5-1.1-6-4.1-6-7.7V4.2l6-2.4z"/><path d="M6.5 9l1.8 1.8L11.8 7"/>'];
 export function dockHTML(active) {
-  return `<nav class="dock"><div class="pill">${DOCK.map(([k, label, svg]) =>
+  const items = store.user?.is_admin ? [...DOCK, ADMIN_ITEM] : DOCK;
+  return `<nav class="dock"><div class="pill">${items.map(([k, label, svg]) =>
     `<button class="di${k === active ? ' on' : ''}" data-nav="${k}" title="${label}" aria-label="${label}" style="background:none;border:none">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${svg}</svg></button>`).join('')}</div></nav>`;
 }

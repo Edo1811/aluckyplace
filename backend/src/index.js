@@ -8,6 +8,7 @@ const helmet  = require('helmet');
 const { query }             = require('./db');
 const { ping: redisPing }   = require('./redis');
 const { verifySocketToken } = require('./auth/middleware');
+const { loadBans, isBanned } = require('./admin/bans');
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 const authRoutes    = require('./auth/routes');
@@ -75,6 +76,7 @@ app.use('/shop',    shopRoutes);
 app.use('/cosmetics', cosmeticRoutes);
 app.use(progressionRoutes);
 app.use('/profile', profileRoutes);
+app.use('/admin',   require('./admin/routes')(io));
 
 // ── Socket.io ─────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
@@ -93,6 +95,10 @@ io.on('connection', (socket) => {
     }
     try {
       const payload = verifySocketToken(token);
+      if (isBanned(payload.userId)) {
+        socket.emit('auth:error', { message: 'Account banned' });
+        return socket.disconnect(true);
+      }
       socket.user = { userId: payload.userId, username: payload.username };
       socket.join(`user:${payload.userId}`);
       socket.emit('auth:ok', { user_id: payload.userId, username: payload.username });
@@ -125,8 +131,30 @@ async function ensureSchema() {
   try {
     await query(`ALTER TABLE guilds ADD COLUMN IF NOT EXISTS icon    VARCHAR(16) NOT NULL DEFAULT '🏰'`);
     await query(`ALTER TABLE guilds ADD COLUMN IF NOT EXISTS icon_bg VARCHAR(9)  NOT NULL DEFAULT '#10b981'`);
+    // admin panel: roles, bans, audit log
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin   BOOLEAN NOT NULL DEFAULT FALSE`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at  TIMESTAMPTZ`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR(200)`);
+    await query(`CREATE TABLE IF NOT EXISTS admin_log (
+      id             BIGSERIAL   PRIMARY KEY,
+      admin_id       UUID        REFERENCES users(id) ON DELETE SET NULL,
+      admin_username VARCHAR(32),
+      action         VARCHAR(40) NOT NULL,
+      target_type    VARCHAR(20),
+      target_id      TEXT,
+      detail         JSONB,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_admin_log_created ON admin_log (created_at DESC)`);
+    // ADMIN_USERNAMES (comma-separated) in .env decides who is an admin
+    if (process.env.ADMIN_USERNAMES !== undefined) {
+      const admins = process.env.ADMIN_USERNAMES.split(',').map((s) => s.trim()).filter(Boolean);
+      await query(`UPDATE users SET is_admin = (username = ANY($1::text[])) WHERE is_admin <> (username = ANY($1::text[]))`, [admins]);
+      console.log(`[admin] admins: ${admins.join(', ') || '(none)'}`);
+    }
     console.log('[DB] Schema up to date ✓');
   } catch (err) { console.error('[DB] Schema upgrade failed:', err.message); }
+  await loadBans();
 }
 
 const PORT = process.env.PORT || 3001;
