@@ -2,10 +2,14 @@ const { generateSeed, deriveFloat, recordResult } = require('./provably-fair');
 const { query, getClient } = require('../db');
 const { recordSoloResult } = require('../progression');
 
-// crash_point = max(1.00, 0.99 / (1 - h))
+// crash_point = max(1.00, 0.99 / (1 - h)), h uniform in [0, 1)
+// → P(crash >= x) = 0.99 / x for every x >= 1: a flat 1% house edge on any
+// cash-out target, ~1% instant 1.00x busts (h < 0.0101), and an uncapped tail.
+// (An old `h >= 0.99 → 1.00` line cut the tail off at 99x, which made the edge
+// grow with the target and made targets >= 99x impossible.)
+const MAX_CRASH = 1e6;
 function calcCrashPoint(h) {
-  if (h >= 0.99) return 1.00;
-  return Math.max(1.00, 0.99 / (1 - h));
+  return Math.min(MAX_CRASH, Math.max(1.00, 0.99 / (1 - h)));
 }
 
 let gameState = {
