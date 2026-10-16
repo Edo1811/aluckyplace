@@ -75,7 +75,14 @@ module.exports = function adminRoutes(io) {
       ]);
       const ids = [...onlineIds()];
       const online = ids.length ? (await query('SELECT id, username FROM users WHERE id = ANY($1::uuid[]) ORDER BY username', [ids])).rows : [];
-      res.json({ totals: totals.rows[0], today: today.rows[0], top_wins: wins.rows, top_losses: losses.rows, online });
+      // Slots mood: today and the next 6 days (hidden from players, visible here)
+      const { moodFor } = require('../games/slots');
+      const slots = Array.from({ length: 7 }, (_, i) => {
+        const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(Date.now() + i * 864e5));
+        const m = moodFor(date);
+        return { date, mood: m.name, rtp: m.rtp };
+      });
+      res.json({ totals: totals.rows[0], today: today.rows[0], top_wins: wins.rows, top_losses: losses.rows, online, slots });
     } catch (e) { fail(res, 'overview', e); }
   });
 

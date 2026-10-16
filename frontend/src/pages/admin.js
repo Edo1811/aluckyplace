@@ -116,6 +116,8 @@ async function overview() {
         <div class="card kpi"><b class="${Number(o.today.house_net) >= 0 ? 'em' : 'red'}">${Number(o.today.house_net) >= 0 ? '+' : '−'}${fmt(Math.abs(o.today.house_net))}</b><small>House net</small></div>
         <div class="card kpi"><b class="em">${o.online.length}</b><small>Online now</small></div>
       </div>
+      <div class="sec">Slots mood <span>hidden from players · changes at midnight</span></div>
+      <div class="tlist">${(o.slots || []).map((d, i) => `<span class="chip2 ${{ cold: 'red', normal: '', warm: 'em', hot: 'gold' }[d.mood]}" style="padding:8px 10px;font-size:10px;flex-shrink:0">${i ? new Date(d.date + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' }) : 'Today'} · ${d.mood} ${Math.round(d.rtp * 100)}%</span>`).join('')}</div>
       <div class="sec">Online now</div>
       <div class="card rows">${o.online.length ? o.online.map((u) => `<div class="row tap" data-u="${u.id}"><span class="dot"></span><span class="grow">${esc(u.username)}</span></div>`).join('') : '<div class="empty">Nobody</div>'}</div>
       <div class="sec">Biggest wins today</div><div class="card rows">${list(o.top_wins.filter((r) => Number(r.net) > 0))}</div>

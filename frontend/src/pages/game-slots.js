@@ -71,8 +71,8 @@ export function renderSlots(app) {
   function landed() {
     syncBalance(res.cc_balance);
     const m = Number(res.multiplier), tag = $('slTag');
-    tag.textContent = m ? `${res.reels.map((x) => GLYPH[x]).join(' ')} · ${m}× · +${fmt(res.payout)} CC` : res.nearMiss ? 'So close' : 'No match this time';
-    tag.style.color = m ? (m >= 40 ? GOLD : EM) : 'rgba(255,255,255,.3)'; tag.style.fontSize = '13px';
+    tag.textContent = m > 1 ? `${res.reels.map((x) => GLYPH[x]).join(' ')} · ${m}× · +${fmt(res.payout)} CC` : m === 1 ? '🍒🍒 · money back' : res.nearMiss ? 'So close' : 'No match this time';
+    tag.style.color = m > 1 ? (m >= 40 ? GOLD : EM) : m === 1 ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.3)'; tag.style.fontSize = '13px';
     sNet += Number(res.net); spins++; best = Math.max(best, m); lastSeed = res.seed;
     hud();
   }
@@ -128,7 +128,7 @@ export function renderSlots(app) {
       c.restore();
       c.strokeStyle = live ? em(0.35) : w(0.1); c.lineWidth = live ? 1.6 : 1; rr(c, x, y0, rw, rh, rw * 0.12); c.stroke();
     }
-    const hit = !spin && res && Number(res.multiplier) > 0;
+    const hit = !spin && res && Number(res.multiplier) > 1;
     c.strokeStyle = hit ? em(0.7) : em(0.16); c.lineWidth = hit ? 2 : 1;
     c.beginPath(); c.moveTo(x0 - 9, H * 0.5); c.lineTo(x0 + rw * 3 + gap * 2 + 9, H * 0.5); c.stroke();
     if (hit) { const a = 0.09 + 0.06 * Math.sin(performance.now() / 150); c.fillStyle = Number(res.multiplier) >= 40 ? gd(a) : em(a); c.fillRect(0, 0, W, H); }
