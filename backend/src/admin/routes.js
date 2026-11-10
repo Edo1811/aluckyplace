@@ -76,14 +76,43 @@ module.exports = function adminRoutes(io) {
       const ids = [...onlineIds()];
       const online = ids.length ? (await query('SELECT id, username FROM users WHERE id = ANY($1::uuid[]) ORDER BY username', [ids])).rows : [];
       // Slots mood: today and the next 6 days (hidden from players, visible here)
-      const { moodFor } = require('../games/slots');
-      const slots = Array.from({ length: 7 }, (_, i) => {
-        const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date(Date.now() + i * 864e5));
-        const m = moodFor(date);
-        return { date, mood: m.name, rtp: m.rtp };
-      });
-      res.json({ totals: totals.rows[0], today: today.rows[0], top_wins: wins.rows, top_losses: losses.rows, online, slots });
+      res.json({ totals: totals.rows[0], today: today.rows[0], top_wins: wins.rows, top_losses: losses.rows, online, slots: slotsWeek() });
     } catch (e) { fail(res, 'overview', e); }
+  });
+
+  // ── slots warmth ───────────────────────────────────────────────────────────
+  // Today and the next 6 days (hidden from players, visible + settable here)
+  function slotsWeek() {
+    const { moodFor, berlinDate } = require('../games/slots');
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = berlinDate(new Date(Date.now() + i * 864e5));
+      const m = moodFor(date);
+      return { date, mood: m.name, rtp: m.rtp, overridden: m.overridden };
+    });
+  }
+
+  // Body: { date: 'YYYY-MM-DD', mood: 'cold'|'normal'|'warm'|'hot'|null } — null = back to random
+  router.post('/slots/mood', async (req, res) => {
+    const { MOODS, setMoodOverride, moodFor } = require('../games/slots');
+    const date = String(req.body?.date || '');
+    const mood = req.body?.mood ?? null;
+    const week = slotsWeek();
+    if (!week.some((d) => d.date === date)) return res.status(400).json({ error: 'Date must be today or within the next 6 days' });
+    if (mood !== null && !MOODS.some((m) => m.name === mood)) return res.status(400).json({ error: 'Mood must be cold, normal, warm or hot' });
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const before = moodFor(date);
+      await setMoodOverride(date, mood, req.admin.userId, client);
+      await log(req, 'slots_mood', 'slots', date, { before: { mood: before.name, overridden: before.overridden }, after: mood ?? 'auto' }, client);
+      await client.query('COMMIT');
+      res.json({ slots: slotsWeek() });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      // the in-memory map may have moved ahead of the rolled-back row — resync
+      await require('../games/slots').loadMoodOverrides().catch(() => {});
+      fail(res, 'slots_mood', e);
+    } finally { client.release(); }
   });
 
   // ── players ────────────────────────────────────────────────────────────────

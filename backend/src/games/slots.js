@@ -25,7 +25,44 @@ const MOODS = [
 ];
 const berlinDate = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(d); // YYYY-MM-DD
 
+// Admin overrides (date → mood name), mirrored from slots_mood_overrides so a
+// spin never waits on the database. Loaded at boot, updated on every admin write.
+const overrides = new Map();
+
+async function loadMoodOverrides() {
+  const { query } = require('../db');
+  const r = await query(`SELECT date, mood FROM slots_mood_overrides WHERE date >= $1`, [berlinDate(new Date(Date.now() - 864e5))]);
+  overrides.clear();
+  r.rows.forEach((x) => overrides.set(x.date, x.mood));
+  return overrides.size;
+}
+
+/** mood = 'cold' | 'normal' | 'warm' | 'hot' to pin a day, null to go back to random. */
+async function setMoodOverride(date, mood, adminId, db) {
+  if (mood === null) {
+    await db.query('DELETE FROM slots_mood_overrides WHERE date = $1', [date]);
+    overrides.delete(date);
+  } else {
+    if (!MOODS.some((m) => m.name === mood)) throw new Error('Unknown mood');
+    await db.query(
+      `INSERT INTO slots_mood_overrides (date, mood, set_by) VALUES ($1, $2, $3)
+       ON CONFLICT (date) DO UPDATE SET mood = EXCLUDED.mood, set_by = EXCLUDED.set_by, set_at = NOW()`,
+      [date, mood, adminId]
+    );
+    overrides.set(date, mood);
+  }
+}
+
 function moodFor(date = berlinDate()) {
+  const pinned = overrides.get(date);
+  if (pinned) {
+    const m = MOODS.find((x) => x.name === pinned);
+    if (m) return { ...m, date, overridden: true };
+  }
+  return { ...randomMood(date), overridden: false };
+}
+
+function randomMood(date) {
   const secret = process.env.SLOTS_MOOD_SECRET || process.env.JWT_SECRET || 'alp';
   const h = crypto.createHmac('sha256', secret).update(`slots:${date}`).digest();
   const x = h.readUInt32BE(0) / 0x100000000;
@@ -124,4 +161,4 @@ async function spin(userId, betAmount) {
   }
 }
 
-module.exports = { spin, moodFor, MOODS };
+module.exports = { spin, moodFor, MOODS, berlinDate, loadMoodOverrides, setMoodOverride };

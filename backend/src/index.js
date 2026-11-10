@@ -159,6 +159,13 @@ async function ensureSchema() {
       created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
     await query(`CREATE INDEX IF NOT EXISTS idx_admin_log_created ON admin_log (created_at DESC)`);
+    // slots warmth overrides (see migrations/005_slots_mood_override.sql)
+    await query(`CREATE TABLE IF NOT EXISTS slots_mood_overrides (
+      date   VARCHAR(10) PRIMARY KEY,
+      mood   VARCHAR(10) NOT NULL,
+      set_by UUID        REFERENCES users(id) ON DELETE SET NULL,
+      set_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
     // ADMIN_USERNAMES (comma-separated) in .env decides who is an admin
     if (process.env.ADMIN_USERNAMES !== undefined) {
       const admins = process.env.ADMIN_USERNAMES.split(',').map((s) => s.trim()).filter(Boolean);
@@ -168,6 +175,8 @@ async function ensureSchema() {
     console.log('[DB] Schema up to date ✓');
   } catch (err) { console.error('[DB] Schema upgrade failed:', err.message); }
   await loadBans();
+  try { const n = await require('./games/slots').loadMoodOverrides(); if (n) console.log(`[slots] ${n} mood override(s) loaded`); }
+  catch (err) { console.error('[slots] Loading mood overrides failed:', err.message); }
 }
 
 const PORT = process.env.PORT || 3001;

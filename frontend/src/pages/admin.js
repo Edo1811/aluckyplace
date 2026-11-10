@@ -81,7 +81,8 @@ export function renderAdmin(app) {
   <div class="scroll"><div class="wrap adm" id="adBody"></div></div>
   ${dockHTML('admin')}
   ${sheetHTML('shAdUser', 'Player', '<div id="adUser"></div>')}
-  ${sheetHTML('shAdGuild', 'Guild', '<div id="adGuild"></div>')}`;
+  ${sheetHTML('shAdGuild', 'Guild', '<div id="adGuild"></div>')}
+  ${sheetHTML('shAdSlots', 'Slots mood', '<div id="adSlots"></div>')}`;
   bindNav(app);
   $('adTabs').querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => {
     tab = b.dataset.t;
@@ -116,14 +117,44 @@ async function overview() {
         <div class="card kpi"><b class="${Number(o.today.house_net) >= 0 ? 'em' : 'red'}">${Number(o.today.house_net) >= 0 ? '+' : '−'}${fmt(Math.abs(o.today.house_net))}</b><small>House net</small></div>
         <div class="card kpi"><b class="em">${o.online.length}</b><small>Online now</small></div>
       </div>
-      <div class="sec">Slots mood <span>hidden from players · changes at midnight</span></div>
-      <div class="tlist">${(o.slots || []).map((d, i) => `<span class="chip2 ${{ cold: 'red', normal: '', warm: 'em', hot: 'gold' }[d.mood]}" style="padding:8px 10px;font-size:10px;flex-shrink:0">${i ? new Date(d.date + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' }) : 'Today'} · ${d.mood} ${Math.round(d.rtp * 100)}%</span>`).join('')}</div>
+      <div class="sec">Slots mood <span>hidden from players · tap a day to set it · 📌 = set by you</span></div>
+      <div class="tlist" id="slotWeek">${slotChips(o.slots || [])}</div>
       <div class="sec">Online now</div>
       <div class="card rows">${o.online.length ? o.online.map((u) => `<div class="row tap" data-u="${u.id}"><span class="dot"></span><span class="grow">${esc(u.username)}</span></div>`).join('') : '<div class="empty">Nobody</div>'}</div>
       <div class="sec">Biggest wins today</div><div class="card rows">${list(o.top_wins.filter((r) => Number(r.net) > 0))}</div>
       <div class="sec">Biggest losses today</div><div class="card rows">${list(o.top_losses.filter((r) => Number(r.net) < 0))}</div>`;
     $('adBody').querySelectorAll('[data-u]').forEach((r) => r.addEventListener('click', () => openUser(r.dataset.u)));
+    bindSlotChips(o.slots || []);
   } catch (e) { err(e); }
+}
+
+// ── slots warmth ─────────────────────────────────────────────────────────────
+const MOODS = [['cold', 80, 'red'], ['normal', 92, ''], ['warm', 100, 'em'], ['hot', 110, 'gold']];
+const moodCls = (m) => (MOODS.find((x) => x[0] === m) || [])[2] || '';
+const dayLabel = (d, i) => (i ? new Date(d.date + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' }) : 'Today');
+
+function slotChips(week) {
+  return week.map((d, i) => `<button class="chip2 ${moodCls(d.mood)}" data-sd="${i}" style="padding:8px 10px;font-size:10px;flex-shrink:0;border:none;cursor:pointer">${d.overridden ? '📌 ' : ''}${dayLabel(d, i)} · ${d.mood} ${Math.round(d.rtp * 100)}%</button>`).join('');
+}
+function bindSlotChips(week) {
+  $('slotWeek').querySelectorAll('[data-sd]').forEach((b) => b.addEventListener('click', () => openSlotDay(week, Number(b.dataset.sd))));
+}
+function openSlotDay(week, i) {
+  const d = week[i];
+  $('adSlots').innerHTML = `
+    <div class="lbl" style="text-transform:none;letter-spacing:0;margin-bottom:10px">${dayLabel(d, i)} · ${esc(d.date)} — now <b>${d.mood}</b> ${d.overridden ? '(set by you)' : '(random)'}${i ? '' : '<br>Changing today applies from the next spin.'}</div>
+    <div class="card rows">
+      <div class="row tap" data-m=""><span class="grow">Auto <small>· back to the random daily mood</small></span>${d.overridden ? '' : '<span class="chip2">current</span>'}</div>
+      ${MOODS.map(([m, rtp, c]) => `<div class="row tap" data-m="${m}"><span class="grow"><span class="chip2 ${c}">${m}</span> <small>· ${rtp}% RTP</small></span>${d.overridden && d.mood === m ? '<span class="chip2 gold">📌 pinned</span>' : ''}</div>`).join('')}
+    </div>`;
+  openSheet('shAdSlots');
+  $('adSlots').querySelectorAll('[data-m]').forEach((r) => r.addEventListener('click', async () => {
+    const mood = r.dataset.m || null;
+    const res = await run(() => api.post('/admin/slots/mood', { date: d.date, mood }), mood ? `${dayLabel(d, i)} set to ${mood}` : `${dayLabel(d, i)} back to random`);
+    if (!res) return;
+    closeSheets();
+    if ($('slotWeek')) { $('slotWeek').innerHTML = slotChips(res.slots); bindSlotChips(res.slots); }
+  }));
 }
 
 // ── players ──────────────────────────────────────────────────────────────────
