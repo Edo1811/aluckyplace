@@ -48,3 +48,19 @@ export const sfx = {
   settle() { tone(220, 0.12, { type: 'sine', vol: 0.08 }); noise(0.06, { from: 1500, to: 600, vol: 0.05 }); },
   streak() { [880, 1109, 1319].forEach((f, i) => tone(f, 0.12, { at: i * 0.05, vol: 0.04, type: 'square' })); },
 };
+
+let lastPeg = 0;
+/** Peg tick, pitched up the further down the board the ball is (k 0..1). Throttled for ball storms. */
+export function pegTick(k) {
+  const now = performance.now(); if (now - lastPeg < 28) return; lastPeg = now;
+  tone(520 + k * 900, 0.03, { type: 'triangle', vol: 0.022 });
+}
+/** Bucket landing sound by tier: 0 loss, 1 break-even-ish, 2 win, 3 big, 4 jackpot. */
+export function bucket(tier) {
+  if (tier === 0) return tone(180, 0.12, { type: 'sine', vol: 0.05, slide: 0.7 });
+  if (tier === 1) return tone(440, 0.09, { vol: 0.035 });
+  if (tier === 2) return [587, 880].forEach((f, i) => tone(f, 0.14, { at: i * 0.06, vol: 0.045 }));
+  if (tier === 3) return [659, 880, 1175].forEach((f, i) => tone(f, 0.2, { at: i * 0.07, vol: 0.055 }));
+  [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.3, { at: i * 0.07, vol: 0.06 }));
+  noise(0.6, { from: 300, to: 6000, vol: 0.05, at: 0.1 }); vib([40, 30, 80]);
+}

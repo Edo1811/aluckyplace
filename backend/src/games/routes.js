@@ -69,7 +69,8 @@ router.get('/roulette/recent', requireAuth, async (_req, res) => {
 // ── POST /games/plinko/drop ───────────────────────────────────────────────────
 router.post('/plinko/drop', requireAuth, async (req, res) => {
   try {
-    const result = await plinko.drop(req.user.userId, req.body.amount);
+    const { amount, rows, risk } = req.body;
+    const result = await plinko.drop(req.user.userId, amount, rows ?? 12, risk ?? 'high');
     return res.json(result);
   } catch (e) {
     return res.status(400).json({ error: e.message });
