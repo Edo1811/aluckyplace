@@ -3,12 +3,15 @@ const { query, getClient } = require('../db');
 const { requireAuth } = require('../auth/middleware');
 const { recordDailyStreak } = require('../progression');
 
-// Reward table from balance.md — index 0 = Day 1
-const DAILY_REWARDS = [100, 200, 250, 300, 400, 500, 750, 800, 1000];
+// Daily reward curve: starts at DAILY_BASE, ×DAILY_MULTIPLIER per streak day,
+// rounded to the nearest 10. Caps at DAILY_MAX_DAY (day 10+ = 59,290 CC).
+const DAILY_BASE       = 500;
+const DAILY_MULTIPLIER = 1.7;
+const DAILY_MAX_DAY    = 10;
 
 function rewardForDay(day) {
-  // Day 9+ stays at 1000 CC
-  return DAILY_REWARDS[Math.min(day - 1, 8)];
+  const d = Math.min(Math.max(day, 1), DAILY_MAX_DAY);
+  return Math.round(DAILY_BASE * DAILY_MULTIPLIER ** (d - 1) / 10) * 10;
 }
 
 // ── GET /daily ────────────────────────────────────────────────────────────────

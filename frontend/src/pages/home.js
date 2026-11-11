@@ -6,8 +6,10 @@ import {
 } from '../ui/core.js';
 import { GAME_BY_ID, gameName } from '../ui/games-meta.js';
 
-const REWARDS = [100, 200, 250, 300, 400, 500, 750, 800, 1000];
-const rewardFor = (day) => REWARDS[Math.min(Math.max(day, 1), 9) - 1];
+// Mirrors backend/src/economy/daily.js — 500 × 1.7^(day-1), rounded to 10, capped at day 10
+const REWARDS = Array.from({ length: 10 }, (_, i) => Math.round(500 * 1.7 ** i / 10) * 10);
+const rewardFor = (day) => REWARDS[Math.min(Math.max(day, 1), REWARDS.length) - 1];
+const pipLabel = (r) => r >= 1000 ? `${+(r / 1000).toFixed(1)}k` : `${r}`;
 
 const CSS = `
 .app{--ac:#10b981;--acr:16,185,129}
@@ -241,7 +243,7 @@ function renderDaily() {
     <div class="track">${REWARDS.map((r, i) => {
       const day = i + 1;
       const cls = day < today || (claimed && day === today) ? 'done' : (day === today && !claimed ? 'today' : '');
-      return `<div class="pip ${cls}"><i></i><span>${r >= 1000 ? '1k' : r}</span></div>`;
+      return `<div class="pip ${cls}"><i></i><span>${pipLabel(r)}</span></div>`;
     }).join('')}</div>
     <button class="claim" id="claim" ${claimed ? 'disabled' : ''}>${claimed ? 'Next reward in <span class="cd" id="cd"></span>' : `Claim ${fmt(daily.reward)} CC`}</button>`;
   clearInterval(cdTimer);
