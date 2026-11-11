@@ -166,9 +166,6 @@ async function ensureSchema() {
       set_by UUID        REFERENCES users(id) ON DELETE SET NULL,
       set_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
-    // cosmetics round 2 catalog rows (see migrations/006_cosmetics_round2.sql)
-    const added = await require('./shop/catalog-round2').seedRound2Catalog(query);
-    if (added) console.log(`[cosmetics] seeded ${added} round 2 catalog item(s)`);
     // ADMIN_USERNAMES (comma-separated) in .env decides who is an admin
     if (process.env.ADMIN_USERNAMES !== undefined) {
       const admins = process.env.ADMIN_USERNAMES.split(',').map((s) => s.trim()).filter(Boolean);
@@ -177,6 +174,12 @@ async function ensureSchema() {
     }
     console.log('[DB] Schema up to date ✓');
   } catch (err) { console.error('[DB] Schema upgrade failed:', err.message); }
+  // cosmetics round 2 catalog rows (see migrations/006_cosmetics_round2.sql).
+  // Own try so a seeding problem can never block the schema upgrades above.
+  try {
+    const added = await require('./shop/catalog-round2').seedRound2Catalog(query);
+    console.log(`[cosmetics] round 2 catalog: ${added} item(s) added`);
+  } catch (err) { console.error('[cosmetics] Seeding round 2 catalog failed:', err.message); }
   await loadBans();
   try { const n = await require('./games/slots').loadMoodOverrides(); if (n) console.log(`[slots] ${n} mood override(s) loaded`); }
   catch (err) { console.error('[slots] Loading mood overrides failed:', err.message); }

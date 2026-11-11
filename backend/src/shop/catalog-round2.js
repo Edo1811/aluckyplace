@@ -125,8 +125,8 @@ async function seedRound2Catalog(query) {
   for (const it of ROUND2_CATALOG) {
     const res = await query(
       `INSERT INTO cosmetics_catalog (name, category, rarity, preview_key, is_obtainable)
-       SELECT $1, $2, $3, $4, TRUE
-       WHERE NOT EXISTS (SELECT 1 FROM cosmetics_catalog WHERE preview_key = $4)`,
+       SELECT $1::varchar, $2::varchar, $3::varchar, $4::varchar, TRUE
+       WHERE NOT EXISTS (SELECT 1 FROM cosmetics_catalog WHERE preview_key = $4::varchar)`,
       [it.name, it.category, it.rarity, it.preview_key]
     );
     added += res.rowCount || 0;
