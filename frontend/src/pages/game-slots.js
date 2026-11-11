@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, fmt, toast, later } from '../ui/core.js';
-import { gameShell, fitCanvas, loop, syncBalance, eOut } from '../games/shell.js';
+import { gameShell, fitCanvas, loop, syncBalance, eOut, maybeWinFx } from '../games/shell.js';
 import { rr, w, em, gd, cl, EM, GOLD, PF, pullGesture } from '../games/draw.js';
 
 // Server symbols → reel glyphs. Pays: 3×Diamond 100, Star 40, Dollar 15, Bell 8, Cherry 3; 2+ Cherry 2.
@@ -73,7 +73,7 @@ export function renderSlots(app) {
     const m = Number(res.multiplier), tag = $('slTag');
     tag.textContent = m > 1 ? `${res.reels.map((x) => GLYPH[x]).join(' ')} · ${m}× · +${fmt(res.payout)} CC` : m === 1 ? '🍒🍒 · money back' : res.nearMiss ? 'So close' : 'No match this time';
     tag.style.color = m > 1 ? (m >= 40 ? GOLD : EM) : m === 1 ? 'rgba(255,255,255,.6)' : 'rgba(255,255,255,.3)'; tag.style.fontSize = '13px';
-    sNet += Number(res.net); spins++; best = Math.max(best, m); lastSeed = res.seed;
+    sNet += Number(res.net); spins++; best = Math.max(best, m); lastSeed = res.seed; maybeWinFx(Number(res.payout) - bet, bet);
     hud();
   }
   function hud() {
@@ -86,7 +86,7 @@ export function renderSlots(app) {
     if (spin) slamAll();
     const finish = () => {
       if (inflight) return later(120, finish);
-      shell.result({ net: sNet, sub: `${spins} ${spins === 1 ? 'spin' : 'spins'}${best ? ` · best ${best}×` : ''}`, seed: lastSeed, again: () => start(bet), change });
+      shell.result({ bet: 0, net: sNet, sub: `${spins} ${spins === 1 ? 'spin' : 'spins'}${best ? ` · best ${best}×` : ''}`, seed: lastSeed, again: () => start(bet), change });
     };
     finish();
   }

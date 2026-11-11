@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { store } from '../store.js';
 import { $, fmt, toast } from '../ui/core.js';
-import { gameShell, fitCanvas, loop, syncBalance } from '../games/shell.js';
+import { gameShell, fitCanvas, loop, syncBalance, maybeWinFx } from '../games/shell.js';
 import { rr, w, em, gd, GOLD, EM, PF } from '../games/draw.js';
 
 // Server: 12 rows, path of 'L'/'R', slot 0–12.
@@ -46,6 +46,7 @@ export function renderPlinko(app) {
   function land(b) {
     net += b.payout; localBal(b.payout);
     if (b.mult > best) best = b.mult;
+    maybeWinFx(b.payout - bet, bet);
     pops.push({ i: b.slot, t: 0, m: b.mult });
     hud(); settle();
   }
@@ -54,7 +55,7 @@ export function renderPlinko(app) {
       if (waiting || balls.length) return setTimeout(finish, 120);
       settle();
       shell.result({
-        net, sub: `${n} ${n === 1 ? 'ball' : 'balls'}${best ? ` · best ${best}×` : ''}`, seed,
+        bet: 0, net, sub: `${n} ${n === 1 ? 'ball' : 'balls'}${best ? ` · best ${best}×` : ''}`, seed,
         again: () => start(bet), change,
       });
     };

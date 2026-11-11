@@ -96,11 +96,17 @@ router.get('/leaderboard', requireAuth, async (req, res) => {
 router.get('/hall-of-fame', requireAuth, async (_req, res) => {
   try {
     const r = await query(
-      `SELECT h.id, h.trigger, h.amount, h.game, h.extra, h.created_at, u.username
+      `SELECT h.id, h.trigger, h.amount, h.game, h.extra, h.created_at, u.username,
+              fx.preview_key AS win_effect
        FROM hall_of_fame h JOIN users u ON u.id = h.user_id
+       LEFT JOIN LATERAL (
+         SELECT cc.preview_key FROM user_cosmetics uc JOIN cosmetics_catalog cc ON cc.id = uc.cosmetic_id
+         WHERE uc.user_id = h.user_id AND uc.is_equipped = TRUE AND cc.category = 'win_effect' LIMIT 1
+       ) fx ON TRUE
        ORDER BY h.created_at DESC LIMIT 50`
     );
-    res.json({ entries: r.rows.map(fmtHallEntry) });
+    // win_effect: the player's currently equipped win effect (ticker flair)
+    res.json({ entries: r.rows.map((row) => ({ ...fmtHallEntry(row), win_effect: row.win_effect || null })) });
   } catch (err) {
     console.error('[social/hall-of-fame]', err.message);
     res.status(500).json({ error: 'Failed to load Hall of Fame' });

@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { store, updateBalance } from '../store.js';
 import { renderAvatarFrame, renderCosmeticPreview, CATEGORY_LABELS } from '../cosmeticPreview.js';
+import { fxPreviewHTML, backdropPreviewHTML, backdropFillHTML, BIG_WIN_MULTIPLIER } from '../cosmeticFx.js';
 import {
   $, fmt, esc, hexA, toast, dockHTML, bindNav, balanceHTML, bindBalance, emitBalance, amountOf,
   playerFrame, playerName, playerBadge, RARITY_COLORS, sheetHTML, openSheet, closeSheets, holdButton, onLeave,
@@ -13,7 +14,7 @@ const PACKS = [
   { type: 'epic_cache', name: 'Epic Cache', price: 75, desc: 'Rare or better, guaranteed.', c1: '#b77cf7', c2: '#3b1466', glow: 'rgba(168,85,247,.32)', em: '🔮', odds: { Rare: 40, Epic: 42, Legendary: 15, Exotic: 3 } },
   { type: 'exotic_crate', name: 'Exotic Crate', price: 250, desc: 'Epic minimum. The good stuff lives here.', c1: '#fb923c', c2: '#7c2d12', glow: 'rgba(249,115,22,.36)', em: '🌋', odds: { Epic: 55, Legendary: 33, Exotic: 12 } },
 ];
-const CATS = [['', 'All'], ['avatar_frame', 'Frames'], ['name_aura', 'Auras'], ['name_color', 'Colours'], ['name_font', 'Fonts'], ['chat_badge', 'Badges'], ['status_title', 'Titles'], ['custom_emoji', 'Emoji']];
+const CATS = [['', 'All'], ['avatar_frame', 'Frames'], ['name_aura', 'Auras'], ['name_color', 'Colours'], ['name_font', 'Fonts'], ['chat_badge', 'Badges'], ['status_title', 'Titles'], ['custom_emoji', 'Emoji'], ['win_effect', 'Win FX'], ['profile_backdrop', 'Backdrops']];
 const RARS = ['Common', 'Rare', 'Epic', 'Legendary', 'Exotic'];
 const LV = { Common: 1, Rare: 2, Epic: 3, Legendary: 4, Exotic: 5 };
 const TYPICAL = { Common: 6, Rare: 18, Epic: 45, Legendary: 140, Exotic: 520 };
@@ -202,9 +203,20 @@ function preview(it, big) {
   if (it.category === 'avatar_frame') return renderAvatarFrame(it, 74 * k, `<span class="av-initial" style="font-size:${Math.round(21 * k)}px">${esc(me().slice(0, 1).toUpperCase())}</span>`);
   if (['name_aura', 'name_color', 'name_font'].includes(it.category)) return playerName(me(), [it], big ? 30 : 21);
   if (it.category === 'status_title') return `<span style="font-size:${big ? 20 : 14}px;font-style:italic;color:rgba(255,255,255,.62);padding:0 10px;text-align:center">"${esc(it.name)}"</span>`;
+  if (it.category === 'win_effect') return fxPreviewHTML(it.preview_key, big ? 170 : 132);
+  if (it.category === 'profile_backdrop') return backdropPreviewHTML(it.preview_key, big ? 170 : 132, playerFrame(me(), meCos, big ? 40 : 32));
   return `<div style="transform:scale(${big ? 1.8 : 1.3})">${renderCosmeticPreview(it).innerHTML}</div>`;
 }
 function tryOn(it) {
+  if (it.category === 'win_effect') {
+    return `${fxPreviewHTML(it.preview_key, 270)}<div style="font-size:12px;color:rgba(255,255,255,.45);margin-top:6px">Plays full screen when you win ${BIG_WIN_MULTIPLIER}× your bet or more,<br>and flashes next to your name in the live ticker.</div>`;
+  }
+  if (it.category === 'profile_backdrop') {
+    const cur = { ...(meCos || {}) }, title = meCos?.status_title?.name || '';
+    return `<div style="position:relative;width:100%;max-width:320px;border-radius:16px;overflow:hidden;padding:22px 14px 18px;display:flex;flex-direction:column;align-items:center;gap:6px">${backdropFillHTML(it.preview_key)}
+      <div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:6px">${playerFrame(me(), cur, 82)}${playerName(me(), cur, 24)}
+      ${title ? `<div style="font-size:12px;font-style:italic;color:rgba(255,255,255,.7);text-shadow:0 1px 6px #000">"${esc(title)}"</div>` : ''}</div></div>`;
+  }
   const cos = { ...(meCos || {}) };
   if (it.category !== 'status_title' && it.category !== 'custom_emoji') cos[it.category] = it;
   const title = it.category === 'status_title' ? it.name : (meCos?.status_title?.name || '');

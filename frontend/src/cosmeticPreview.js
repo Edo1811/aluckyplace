@@ -30,6 +30,8 @@
 // hue-shimmer instead of a bigger Legendary pulse for auras/the old generic
 // frame fallback.)
 
+import { isCanvasFrame, frameLayersHTML, fxPreviewHTML, backdropPreviewHTML } from './cosmeticFx.js';
+
 const RARITY_COLORS = {
   Common:    '#9ca3af',
   Rare:      '#3b82f6',
@@ -348,8 +350,13 @@ export function renderAvatarFrame(frame, size, inner) {
   const s = sz / FRAME_REF;
   const avSize = r(sz * AV_RATIO);
   const recipe = FRAME_RECIPES[frame.preview_key];
-  let deco, clip = false;
-  if (recipe) {
+  let deco, clip = false, front = '';
+  if (isCanvasFrame(frame.preview_key)) {
+    // Round 2 frames are canvas-drawn (cosmeticFx.js): a layer behind the
+    // avatar circle and one on top, both animated by the shared animator.
+    const layers = frameLayersHTML(frame.preview_key, avSize);
+    deco = layers.back; front = layers.front;
+  } else if (recipe) {
     deco = recipe.deco(s);
     clip = !!recipe.clip;
   } else {
@@ -361,6 +368,7 @@ export function renderAvatarFrame(frame, size, inner) {
   return `<div style="position:relative;width:${sz}px;height:${sz}px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${clip ? 'overflow:hidden;border-radius:50%;' : ''}">
     ${deco}
     <div style="width:${avSize}px;height:${avSize}px;border-radius:50%;background:#111;display:flex;align-items:center;justify-content:center;font-size:${r(avSize*0.42)}px;position:relative;z-index:2">${face}</div>
+    ${front}
   </div>`;
 }
 
@@ -429,6 +437,14 @@ export function renderCosmeticPreview(item) {
       boxStyle: '',
       innerHTML: renderAvatarFrame(item, PREVIEW_FRAME_SIZE),
     };
+  }
+
+  if (item.category === 'win_effect') {
+    return { boxStyle: 'background:#0a0d0c;', innerHTML: fxPreviewHTML(item.preview_key, 96) };
+  }
+
+  if (item.category === 'profile_backdrop') {
+    return { boxStyle: 'background:#070707;', innerHTML: backdropPreviewHTML(item.preview_key, 96) };
   }
 
   if (item.category === 'chat_badge') {
@@ -588,6 +604,8 @@ export const CATEGORY_LABELS = {
   name_color:   'Name Color',
   name_aura:    'Name Aura',
   custom_emoji: 'Custom Emoji',
+  win_effect:   'Win Effect',
+  profile_backdrop: 'Profile Backdrop',
 };
 
 export { RARITY_COLORS };

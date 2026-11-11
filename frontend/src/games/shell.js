@@ -3,6 +3,17 @@
 import './shell.css';
 import { store, updateBalance } from '../store.js';
 import { $, fmt, esc, amountOf, balanceHTML, bindBalance, emitBalance, onLeave } from '../ui/core.js';
+import { api } from '../api.js';
+import { myEquipped, playWinFx, hasWinFx, BIG_WIN_MULTIPLIER } from '../cosmeticFx.js';
+
+const equipped = () => myEquipped(() => api.get(`/profile/${encodeURIComponent(store.user?.username || '')}`).then((p) => p.equipped));
+
+/** Plays the player's equipped win effect if this result paid BIG_WIN_MULTIPLIER× the bet or more.
+ *  Session games (slots, plinko) call it per spin/ball and pass bet: 0 to result(). */
+export function maybeWinFx(net, bet) {
+  if (!(net > 0) || !(bet > 0) || net + bet < BIG_WIN_MULTIPLIER * bet) return;
+  equipped().then((eq) => { const fx = eq && eq.win_effect; if (fx && hasWinFx(fx.preview_key)) playWinFx(fx.preview_key, net); });
+}
 
 /** Push a server-reported balance into the store and every balance pill. */
 export function syncBalance(cc) {
@@ -52,6 +63,7 @@ export function gameShell(app, opts) {
     </section>
   </div>`;
   bindBalance();
+  equipped(); // warm the cache so a big win's effect starts instantly
   $('gexit').addEventListener('click', () => { if (opts.onExit) opts.onExit(); window.__navigate(opts.exitTo || 'games'); });
 
   const show = (id) => document.querySelectorAll('.gscreen').forEach((s) => s.classList.toggle('on', s.id === id));
@@ -85,9 +97,11 @@ export function gameShell(app, opts) {
     },
     stage: () => $('gstage'),
     actions(html) { const a = $('gactions'); a.innerHTML = html; a.style.display = html ? 'flex' : 'none'; return a; },
-    /** Result screen. again(): one-tap replay; change(): back to the bet screen. */
-    result({ net, sub, seed, again, change, againLabel = 'Play again', changeLabel = 'Change bet' }) {
+    /** Result screen. again(): one-tap replay; change(): back to the bet screen.
+     *  bet defaults to the stake placed on the bet screen (used for the big-win effect). */
+    result({ net, sub, seed, again, change, againLabel = 'Play again', changeLabel = 'Change bet', bet = lastBet[opts.id] }) {
       const win = net > 0;
+      maybeWinFx(Number(net), Number(bet));
       $('resBadge').textContent = win ? 'You won' : net === 0 ? 'Break even' : 'You lost';
       $('resAmt').textContent = `${net > 0 ? '+' : net < 0 ? '−' : ''}${fmt(Math.abs(net))} CC`;
       $('resAmt').className = `res-amt ${win ? 'win' : net < 0 ? 'lose' : ''}`;

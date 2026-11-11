@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { store, updateBalance, clearUser } from '../store.js';
 import { renderAvatarFrame, renderCosmeticPreview, CATEGORY_LABELS } from '../cosmeticPreview.js';
+import { fxPreviewHTML, backdropPreviewHTML, backdropFillHTML, hasBackdrop, invalidateMyEquipped } from '../cosmeticFx.js';
 import {
   $, fmt, esc, hexA, timeAgo, toast, dockHTML, bindNav, onLeave, listen,
   playerFrame, playerName, playerBadge, RARITY_COLORS, rarityPill,
@@ -10,11 +11,12 @@ import { mountScene } from '../ui/scenes.js';
 import { gameName, GAME_BY_ID } from '../ui/games-meta.js';
 
 const RAR_LV = { Common: 1, Rare: 2, Epic: 3, Legendary: 4, Exotic: 5, Unique: 6 };
-const CAT_ORDER = ['avatar_frame', 'name_aura', 'name_color', 'name_font', 'chat_badge', 'status_title', 'custom_emoji'];
+const CAT_ORDER = ['avatar_frame', 'profile_backdrop', 'win_effect', 'name_aura', 'name_color', 'name_font', 'chat_badge', 'status_title', 'custom_emoji'];
 
 const CSS = `
 .hero{position:relative;margin:12px 12px 0;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:#070707}
 .hero canvas{position:absolute;inset:0;width:100%;height:100%}
+.hero-scrim{position:absolute;inset:0;z-index:1;background:radial-gradient(70% 60% at 50% 38%,rgba(0,0,0,.42),transparent 75%),linear-gradient(to top,rgba(5,5,5,.75),rgba(5,5,5,0) 45%)}
 .hero-in{position:relative;z-index:2;padding:24px 18px 16px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:3px}
 .avslot{position:relative;margin-bottom:12px}
 .av-badge{position:absolute;bottom:4px;right:4px;z-index:6}
@@ -166,7 +168,8 @@ function renderHero() {
   const eq = P.equipped || {};
   const r = rarest(), rc = r ? (RARITY_COLORS[r.rarity] || '#10b981') : '#10b981';
   const title = eq.status_title ? eq.status_title.name : '';
-  $('hero').innerHTML = `<canvas id="heroCv"></canvas><div class="hero-in">
+  const bd = eq.profile_backdrop && hasBackdrop(eq.profile_backdrop.preview_key) ? eq.profile_backdrop.preview_key : null;
+  $('hero').innerHTML = `${bd ? `${backdropFillHTML(bd)}<div class="hero-scrim"></div>` : '<canvas id="heroCv"></canvas>'}<div class="hero-in">
     <div class="avslot">${playerFrame(P.username, eq, 117)}<div class="av-badge">${playerBadge(eq)}</div></div>
     <div style="line-height:1.1">${playerName(P.username, eq, 31)}</div>
     ${title ? `<div class="ptitle-big">"${esc(title)}"</div>` : ''}
@@ -178,7 +181,7 @@ function renderHero() {
       : '<button class="btn" id="back">Back</button>'}</div>
     <div class="since">Member since ${new Date(P.member_since).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</div>
   </div>`;
-  heroBackdrop(rc);
+  if (!bd) heroBackdrop(rc);
   $('toListings')?.addEventListener('click', () => window.__navigate('shop', { filterMine: true }));
   $('back')?.addEventListener('click', () => window.__navigate('social'));
   $('logout')?.addEventListener('click', async () => {
@@ -310,6 +313,8 @@ function cosmeticPreview(item, size = 1) {
   if (item.category === 'avatar_frame') return renderAvatarFrame(item, 62 * size, `<span class="av-initial" style="font-size:${18 * size}px">${esc(P.username.slice(0, 1).toUpperCase())}</span>`);
   if (['name_aura', 'name_color', 'name_font'].includes(item.category)) return playerName(P.username, [item], 20 * size);
   if (item.category === 'status_title') return `<span style="font-size:${14 * size}px;font-style:italic;color:rgba(255,255,255,.62)">"${esc(item.name)}"</span>`;
+  if (item.category === 'win_effect') return fxPreviewHTML(item.preview_key, 128 * size);
+  if (item.category === 'profile_backdrop') return backdropPreviewHTML(item.preview_key, 128 * size, renderAvatarFrame(null, 26 * size, `<span class="av-initial" style="font-size:${10 * size}px">${esc(P.username.slice(0, 1).toUpperCase())}</span>`));
   const p = renderCosmeticPreview(item);
   return `<div style="transform:scale(${1.2 * size})">${p.innerHTML}</div>`;
 }
@@ -336,7 +341,7 @@ async function cosmetics(c) {
     try {
       await api.post(`/cosmetics/${b.dataset.eq}/${on ? 'unequip' : 'equip'}`);
       toast(on ? 'Unequipped' : 'Equipped', 'em');
-      cache.cos = null;
+      cache.cos = null; invalidateMyEquipped();
       P = await api.get(`/profile/${encodeURIComponent(viewing)}`);
       renderHero(); cosmetics(c);
     } catch (err) { toast(err.message || 'Failed to update', 'red'); b.disabled = false; }

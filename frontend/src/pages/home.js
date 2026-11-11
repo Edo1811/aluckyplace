@@ -5,6 +5,7 @@ import {
   emitBalance, onLeave, bindBalance,
 } from '../ui/core.js';
 import { GAME_BY_ID, gameName } from '../ui/games-meta.js';
+import { fxColor, hasWinFx } from '../cosmeticFx.js';
 
 // Mirrors backend/src/economy/daily.js — 500 × 1.7^(day-1), rounded to 10, capped at day 10
 const REWARDS = Array.from({ length: 10 }, (_, i) => Math.round(500 * 1.7 ** i / 10) * 10);
@@ -77,6 +78,10 @@ const CSS = `
 .q span{font-size:11.5px;font-weight:700}
 .q small{display:block;font-size:9.5px;color:rgba(255,255,255,.3);margin-top:2px}
 .app.broke .q{opacity:.35;pointer-events:none}
+.tkfx{color:#fff;text-shadow:0 0 8px var(--fx),0 0 16px var(--fx);animation:tkfx 1.6s ease-in-out infinite}
+.tkfx i{font-style:normal;color:var(--fx);margin-left:3px;display:inline-block;animation:tkspin 2.4s linear infinite}
+@keyframes tkfx{0%,100%{text-shadow:0 0 6px var(--fx)}50%{text-shadow:0 0 12px var(--fx),0 0 24px var(--fx)}}
+@keyframes tkspin{to{transform:rotate(360deg)}}
 .ticker{height:40px;border-top:1px solid var(--line);overflow:hidden;display:flex;align-items:center;flex-shrink:0;-webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)}
 .tk{display:flex;gap:26px;white-space:nowrap;animation:tick 60s linear infinite;padding-left:26px}
 @keyframes tick{to{transform:translateX(-50%)}}
@@ -308,7 +313,10 @@ function renderSide() {
 }
 
 function tickerHTML(list) {
-  return list.map((e) => `<span class="ti"><b>${esc(e.username)}</b>${e.amount != null
+  // a player with an equipped win effect gets a glowing name + spark in their winning moments
+  const who = (e) => (e.win && e.win_effect && hasWinFx(e.win_effect))
+    ? `<b class="tkfx" style="--fx:${fxColor(e.win_effect)}">${esc(e.username)}<i>✦</i></b>` : `<b>${esc(e.username)}</b>`;
+  return list.map((e) => `<span class="ti">${who(e)}${e.amount != null
     ? (e.win ? ` won <b class="w">+${fmt(Math.abs(e.amount))}</b>` : ` lost <b class="l">−${fmt(Math.abs(e.amount))}</b>`)
     : (e.win ? ' made the Hall of Fame' : ' made the Hall of Shame')}${e.game ? ` <span class="gm">on ${esc(gameName(e.game))}</span>` : ''}</span>`).join('');
 }

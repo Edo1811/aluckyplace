@@ -166,6 +166,9 @@ async function ensureSchema() {
       set_by UUID        REFERENCES users(id) ON DELETE SET NULL,
       set_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
+    // cosmetics round 2 catalog rows (see migrations/006_cosmetics_round2.sql)
+    const added = await require('./shop/catalog-round2').seedRound2Catalog(query);
+    if (added) console.log(`[cosmetics] seeded ${added} round 2 catalog item(s)`);
     // ADMIN_USERNAMES (comma-separated) in .env decides who is an admin
     if (process.env.ADMIN_USERNAMES !== undefined) {
       const admins = process.env.ADMIN_USERNAMES.split(',').map((s) => s.trim()).filter(Boolean);
