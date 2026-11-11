@@ -3,6 +3,7 @@
 // POST /shop/listings          — create listing
 // POST /shop/listings/:id/buy  — purchase (buyer pays price * 1.15, seller gets price)
 // DEL  /shop/listings/:id      — cancel listing
+// GET  /shop/catalog           — every pack-droppable item (pack reel filler)
 // POST /shop/packs/open        — open a pack
 //
 // House cut: 15% added on top of listed price (invisible to seller)
@@ -185,6 +186,26 @@ router.delete('/listings/:id', requireAuth, async (req, res) => {
     return res.json({ ok: true });
   } catch (err) {
     console.error('[shop/listings:delete]', err.message);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── GET /shop/catalog ─────────────────────────────────────────────────────────
+// Every item packs can drop. The pack-opening reel fills its filler cards
+// from this (picked with the pack's real odds); cached for 5 minutes.
+let catalogCache = null, catalogAt = 0;
+router.get('/catalog', requireAuth, async (_req, res) => {
+  try {
+    if (!catalogCache || Date.now() - catalogAt > 5 * 60 * 1000) {
+      const r = await query(
+        `SELECT id, name, category, rarity, preview_key FROM cosmetics_catalog
+         WHERE is_obtainable = TRUE ORDER BY rarity, name`
+      );
+      catalogCache = r.rows; catalogAt = Date.now();
+    }
+    return res.json({ items: catalogCache });
+  } catch (err) {
+    console.error('[shop/catalog]', err.message);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

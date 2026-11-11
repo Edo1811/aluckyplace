@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { store, updateBalance } from '../store.js';
 import { renderAvatarFrame, renderCosmeticPreview, CATEGORY_LABELS } from '../cosmeticPreview.js';
 import { fxPreviewHTML, backdropPreviewHTML, backdropFillHTML, BIG_WIN_MULTIPLIER } from '../cosmeticFx.js';
+import { createPackOpener } from '../packOpening.js';
 import {
   $, fmt, esc, hexA, toast, dockHTML, bindNav, balanceHTML, bindBalance, emitBalance, amountOf,
   playerFrame, playerName, playerBadge, RARITY_COLORS, sheetHTML, openSheet, closeSheets, holdButton, onLeave,
@@ -16,7 +17,6 @@ const PACKS = [
 ];
 const CATS = [['', 'All'], ['avatar_frame', 'Frames'], ['name_aura', 'Auras'], ['name_color', 'Colours'], ['name_font', 'Fonts'], ['chat_badge', 'Badges'], ['status_title', 'Titles'], ['custom_emoji', 'Emoji'], ['win_effect', 'Win FX'], ['profile_backdrop', 'Backdrops']];
 const RARS = ['Common', 'Rare', 'Epic', 'Legendary', 'Exotic'];
-const LV = { Common: 1, Rare: 2, Epic: 3, Legendary: 4, Exotic: 5 };
 const TYPICAL = { Common: 6, Rare: 18, Epic: 45, Legendary: 140, Exotic: 520 };
 
 const STYLE = `
@@ -73,28 +73,6 @@ const STYLE = `
 .oddl span i{width:6px;height:6px;border-radius:50%}
 .pk .buy{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding-top:4px}
 .pk .buy .price{margin:0}
-.reveal{position:fixed;inset:0;z-index:70;background:rgba(3,3,3,.94);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;overflow:hidden}
-.reveal.on{display:flex}
-.stage{position:relative;width:240px;height:240px;display:flex;align-items:center;justify-content:center;cursor:pointer}
-.rays{position:absolute;inset:-60px;border-radius:50%;background:repeating-conic-gradient(var(--rc) 0deg 8deg,transparent 8deg 24deg);opacity:0;-webkit-mask-image:radial-gradient(circle,#000 20%,transparent 68%);mask-image:radial-gradient(circle,#000 20%,transparent 68%);animation:spinr 14s linear infinite;transition:opacity .5s}
-@keyframes spinr{to{transform:rotate(360deg)}}
-.bigcrate{transform:scale(1.7)}
-.bigcrate.shake{animation:shake .12s linear infinite}
-@keyframes shake{0%{transform:scale(1.7) translate(0,0) rotate(0)}25%{transform:scale(1.72) translate(-3px,1px) rotate(-3deg)}50%{transform:scale(1.74) translate(2px,-2px) rotate(2deg)}75%{transform:scale(1.76) translate(-2px,2px) rotate(-2deg)}100%{transform:scale(1.78) translate(3px,0) rotate(3deg)}}
-.rcard{position:absolute;width:190px;border-radius:20px;border:1px solid var(--rc);background:linear-gradient(170deg,rgba(255,255,255,.06),#0b0b0b 55%);box-shadow:0 0 40px var(--rcg),0 20px 50px rgba(0,0,0,.7);padding:18px 14px;display:none;flex-direction:column;align-items:center;gap:8px}
-.rcard.on{display:flex;animation:cardIn .7s cubic-bezier(.2,1.4,.4,1)}
-@keyframes cardIn{0%{transform:scale(.2) rotateY(180deg);opacity:0}100%{transform:scale(1) rotateY(0);opacity:1}}
-.rcard .pvw{height:96px;display:flex;align-items:center;justify-content:center;width:100%}
-.rcard .nm{font-size:17px;font-weight:700}
-.rcard .ct{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.3)}
-.rtier{font-size:30px;font-weight:700;letter-spacing:.04em;opacity:0;transform:translateY(10px);transition:all .4s .35s}
-.rtier.on{opacity:1;transform:none}
-.rdupe{font-size:12px;color:rgba(255,255,255,.5);font-style:italic;min-height:16px}
-.racts{display:flex;gap:9px;width:100%;max-width:340px;opacity:0;transition:opacity .3s .6s}
-.racts.on{opacity:1}
-.racts .btn{flex:1}
-.rhint{font-size:12px;color:rgba(255,255,255,.35);font-style:italic}
-.spark{position:absolute;left:50%;top:50%;width:6px;height:6px;border-radius:50%;pointer-events:none}
 .cv{margin:14px 12px 0;padding:20px 16px;border-radius:20px;border:1px solid var(--line);background:var(--card)}
 .cv-row{display:flex;align-items:center;gap:10px}
 .cv-in{flex:1;min-width:0}
@@ -171,18 +149,22 @@ export async function renderShop(app, opts = {}) {
     <div class="lbl" style="margin-top:16px">You receive (A)</div><input class="inp" id="sellPrice" inputmode="numeric" value="10" style="font-size:22px;font-weight:700">
     <div class="receipt" id="sellRc"></div>
     <p style="font-size:11px;color:rgba(255,255,255,.28);margin-top:10px;font-style:italic">The house adds 15% on top for the buyer. You always get exactly what you list.</p>`,
-    '<button class="btn" data-close>Cancel</button><button class="btn em" id="sellGo">List it</button>')}
-  <div class="reveal" id="reveal"><div class="stage" id="stage"><div class="rays" id="rays"></div><div id="bigcrate"></div><div class="rcard" id="rcard"></div></div>
-    <div class="rtier" id="rtier"></div><div class="rdupe" id="rdupe"></div><div class="rhint" id="rhint"></div><div class="racts" id="racts"></div></div>`;
+    '<button class="btn" data-close>Cancel</button><button class="btn em" id="sellGo">List it</button>')}`;
   bindNav(app); bindBalance();
-  onLeave(() => $('reveal')?.remove());
+  opener = createPackOpener({
+    api, preview,
+    getA: () => Number(store.aBalance),
+    setA: (a) => { updateBalance({ a_balance: a }); emitBalance(); owned = null; },
+    onClose: () => { if (tab === 'packs') paintPacks(); },
+    toast,
+  });
+  onLeave(() => { opener?.destroy(); opener = null; });
   document.querySelectorAll('#shtabs [data-t]').forEach((b) => b.addEventListener('click', () => go(b.dataset.t)));
   document.querySelectorAll('.seg [data-v]').forEach((b) => b.addEventListener('click', () => { mineOnly = b.dataset.v === 'mine'; paintSeg(); paintGrid(); }));
   $('sellBtn').addEventListener('click', openSell);
   $('sellPrice').addEventListener('input', paintSell);
   $('sellGo').addEventListener('click', submitSell);
   wireConvert();
-  $('stage').addEventListener('click', crack);
   api.get(`/profile/${encodeURIComponent(store.user?.username || '')}`).then((p) => { meCos = p.equipped; }).catch(() => {});
   go(tab);
 }
@@ -322,60 +304,12 @@ function paintPacks() {
       <div class="odds">${Object.entries(pk.odds).map(([r, v]) => `<i style="width:${v}%;background:${RARITY_COLORS[r]}"></i>`).join('')}</div>
       <div class="oddl">${Object.entries(pk.odds).map(([r, v]) => `<span><i style="background:${RARITY_COLORS[r]}"></i>${r} ${v}%</span>`).join('')}</div></div>
     <div class="buy"><span class="price"><i class="coin">A</i>${pk.price}</span>
-      <button class="btn ${A >= pk.price ? 'gold' : ''}" data-pk="${i}" ${A >= pk.price ? '' : 'disabled'}>${A >= pk.price ? 'Open' : `Need ${fmt(pk.price - A)} more A`}</button></div></div>`).join('');
-  $('packs').querySelectorAll('[data-pk]').forEach((b) => b.addEventListener('click', () => openPack(Number(b.dataset.pk))));
+      <div style="display:flex;gap:8px">${A >= pk.price * 5 ? `<button class="btn" data-pk="${i}" data-n="5">×5 · ${pk.price * 5} A</button>` : ''}
+      <button class="btn ${A >= pk.price ? 'gold' : ''}" data-pk="${i}" data-n="1" ${A >= pk.price ? '' : 'disabled'}>${A >= pk.price ? 'Open' : `Need ${fmt(pk.price - A)} more A`}</button></div></div></div>`).join('');
+  $('packs').querySelectorAll('[data-pk]').forEach((b) => b.addEventListener('click', () => openPack(Number(b.dataset.pk), Number(b.dataset.n) || 1)));
 }
-let opening = null;
-function openPack(i) {
-  const pk = PACKS[i]; if (Number(store.aBalance) < pk.price) return;
-  opening = { pk, i, state: 'closed', res: null, req: null };
-  opening.req = api.post('/shop/packs/open', { pack_type: pk.type }).then((r) => { opening.res = r; return r; });
-  opening.req.catch((err) => { toast(err.message || 'Could not open the pack', 'red'); $('reveal').classList.remove('on'); opening = null; });
-  $('bigcrate').className = 'bigcrate'; $('bigcrate').innerHTML = crate(pk); $('bigcrate').style.display = '';
-  $('rays').style.opacity = 0; $('rcard').className = 'rcard'; $('rtier').className = 'rtier'; $('rtier').textContent = '';
-  $('rdupe').textContent = ''; $('racts').className = 'racts'; $('racts').innerHTML = ''; $('rhint').style.display = ''; $('rhint').textContent = 'Tap the crate to open it';
-  $('reveal').classList.add('on');
-}
-async function crack() {
-  if (!opening || opening.state !== 'closed') return;
-  const o = opening; o.state = 'shaking'; $('rhint').textContent = '…';
-  $('bigcrate').classList.add('shake');
-  let r;
-  try { r = await o.req; } catch { return; }
-  const lv = LV[r.rarity] || 1;
-  await new Promise((res) => setTimeout(res, lv >= 4 ? 1400 : 900));
-  if (opening !== o) return;
-  const rc = RARITY_COLORS[r.rarity] || '#9ca3af';
-  $('reveal').style.setProperty('--rc', hexA(rc, .55)); $('reveal').style.setProperty('--rcg', hexA(rc, .5));
-  $('bigcrate').style.display = 'none'; $('rhint').style.display = 'none';
-  burst(rc);
-  $('rays').style.opacity = lv >= 3 ? 0.9 : 0.45;
-  $('rcard').style.setProperty('--rc', rc);
-  $('rcard').innerHTML = `<div class="pvw">${preview(r.item, lv >= 4)}</div><div class="nm">${esc(r.item.name)}</div><div class="ct">${CATEGORY_LABELS[r.item.category] || ''}</div>`;
-  $('rcard').classList.add('on');
-  $('rtier').textContent = r.rarity; $('rtier').style.color = rc; $('rtier').classList.add('on');
-  $('rdupe').textContent = r.duplicate ? `You already own this — refunded ${fmt(r.refund_a)} A` : '';
-  updateBalance({ a_balance: r.a_balance }); emitBalance(); owned = null;
-  const again = Number(store.aBalance) >= o.pk.price;
-  $('racts').innerHTML = `${r.duplicate ? '' : '<button class="btn" id="rEquip">Equip it</button>'}<button class="btn ${again ? 'gold' : ''}" id="rAgain">${again ? `Open another · ${o.pk.price} A` : 'Done'}</button>`;
-  $('racts').classList.add('on');
-  $('rEquip')?.addEventListener('click', async () => {
-    try { await api.post(`/cosmetics/${r.item.id}/equip`); toast(`${r.item.name} equipped`, 'em'); } catch (err) { toast(err.message || 'Could not equip', 'red'); }
-    $('reveal').classList.remove('on'); paintPacks();
-  });
-  $('rAgain').addEventListener('click', () => { if (again) openPack(o.i); else { $('reveal').classList.remove('on'); paintPacks(); } });
-  o.state = 'open';
-  if (lv >= 4) toast(`${r.rarity} pull! ${r.item.name}`, 'gold');
-}
-function burst(c) {
-  for (let k = 0; k < 28; k++) {
-    const s = document.createElement('div'); s.className = 'spark'; s.style.background = k % 3 ? c : '#fff'; s.style.boxShadow = `0 0 8px ${c}`;
-    $('stage').appendChild(s);
-    const a = Math.random() * Math.PI * 2, d = 90 + Math.random() * 90;
-    s.animate([{ transform: 'translate(-50%,-50%) scale(1)', opacity: 1 }, { transform: `translate(calc(-50% + ${Math.cos(a) * d}px),calc(-50% + ${Math.sin(a) * d}px)) scale(.2)`, opacity: 0 }],
-      { duration: 700 + Math.random() * 400, easing: 'cubic-bezier(.2,.8,.3,1)' }).onfinish = () => s.remove();
-  }
-}
+let opener = null;
+function openPack(i, count = 1) { if (opener) opener.open(PACKS[i], count); }
 
 // ── convert ─────────────────────────────────────────────────────────────────
 function paintConvert() {

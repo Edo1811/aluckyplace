@@ -527,3 +527,6 @@ export const ROUND2_BACKDROPS = BG.map(({ n, r, k }) => ({ name: n, rarity: r, p
 export const ROUND2_FRAMES = F.map(({ n, r, k }) => ({ name: n, rarity: r, preview_key: k }));
 
 startCosmeticAnimator();
+
+/** Low-level drawing helpers, shared with the pack-opening reveal. */
+export { flash, rays, sparkle, coin3d };
