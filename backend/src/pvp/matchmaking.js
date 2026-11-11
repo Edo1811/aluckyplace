@@ -149,6 +149,12 @@ function registerPvpHandlers(io, socket) {
       return resolveMove(io, match);
     }
 
+    if (match.game === 'duels') {
+      // one locked move per round, and it has to be legal right now
+      if ((isP1 ? match.move1 : match.move2) !== null) return;
+      if (!duelMoveOk(match, userId, move)) return socket.emit('pvp:error', { message: 'You can\'t do that this round' });
+    }
+
     if (isP1) match.move1 = move; else match.move2 = move;
 
     // Notify opponent that the player has moved (without revealing the move)
@@ -351,7 +357,9 @@ function startGame(io, match) {
     match.state.scores   = { [player1.userId]: 0, [player2.userId]: 0 };
     match.state.round    = 1;
   } else if (game === 'duels') {
-    match.state.hp       = { [player1.userId]: 3, [player2.userId]: 3 };
+    match.state.hp       = { [player1.userId]: DUEL_HP, [player2.userId]: DUEL_HP };
+    match.state.charge   = { [player1.userId]: 0, [player2.userId]: 0 };
+    match.state.defends  = { [player1.userId]: 0, [player2.userId]: 0 }; // defends in a row
     match.state.round    = 1;
   } else if (game === 'uno') {
     initUno(match);
@@ -364,10 +372,15 @@ function startGame(io, match) {
 }
 
 function startTurnTimer(io, match) {
-  const timeout = match.game === 'rps' ? 5000 : 10000;
+  const timeout = match.game === 'rps' ? 5000 : match.game === 'duels' ? DUEL_TURN_MS : 10000;
   match.turnTimer = setTimeout(() => {
     if (match.phase !== 'active') return;
     // Auto-move for players who haven't moved
+    if (match.game === 'duels') {
+      if (match.move1 === null) match.move1 = duelAutoMove(match, match.player1.userId);
+      if (match.move2 === null) match.move2 = duelAutoMove(match, match.player2.userId);
+      return resolveMove(io, match);
+    }
     if (match.move1 === null) match.move1 = getAutoMove(match.game);
     if (match.move2 === null) match.move2 = getAutoMove(match.game);
     resolveMove(io, match);
@@ -466,44 +479,81 @@ function resolveRps(io, match) {
 }
 
 // ── Duels ─────────────────────────────────────────────────────────────────────
-const DUELS_TABLE = {
-  attack:  { attack: [1,1], defend: [0,0], special: [1,0] },
-  defend:  { attack: [0,0], defend: [0,0], special: [1,0] },
-  special: { attack: [0,1], defend: [0,1], special: [1,1] },
-};
+// 007 rules. Charge loads your one shot (max 1). Attack spends it: it hits a
+// player who is charging, is blocked by Defend, and two attacks cancel out.
+// Defend at most 2 rounds in a row so nobody can stall forever.
+const DUEL_HP = 3;
+const DUEL_TURN_MS = 7000;
+const DUEL_MAX_DEFENDS = 2;
+const DUEL_SUDDEN_ROUND = 20;  // from here on both players are down to 1 life
+const DUEL_HARD_CAP = 60;      // practically unreachable; decided by the seed
+
+function duelMoveOk(match, userId, move) {
+  const st = match.state;
+  if (move === 'attack') return st.charge[userId] >= 1;
+  if (move === 'charge') return st.charge[userId] < 1;
+  if (move === 'defend') return st.defends[userId] < DUEL_MAX_DEFENDS;
+  return false;
+}
+function duelAutoMove(match, userId) {
+  if (duelMoveOk(match, userId, 'defend')) return 'defend';
+  if (duelMoveOk(match, userId, 'charge')) return 'charge';
+  return 'attack';
+}
 
 function resolveDuels(io, match) {
   const { matchId, player1, player2, move1, move2, state } = match;
-  const [dmg1, dmg2] = DUELS_TABLE[move1][move2];
-  state.hp[player1.userId] -= dmg1;
-  state.hp[player2.userId] -= dmg2;
+  const p1 = player1.userId, p2 = player2.userId;
+  // damage taken: you only get hit while charging into an attack
+  const dmg1 = move2 === 'attack' && move1 === 'charge' ? 1 : 0;
+  const dmg2 = move1 === 'attack' && move2 === 'charge' ? 1 : 0;
+  const clash = move1 === 'attack' && move2 === 'attack';
+  const blocked1 = move2 === 'attack' && move1 === 'defend'; // p1 blocked p2's shot
+  const blocked2 = move1 === 'attack' && move2 === 'defend';
 
-  const s1 = userSocket.get(player1.userId);
-  const s2 = userSocket.get(player2.userId);
-
-  const hp1 = state.hp[player1.userId];
-  const hp2 = state.hp[player2.userId];
-
-  if (s1) s1.emit('pvp:round_result', { match_id: matchId, your_move: move1, opp_move: move2, your_hp: hp1, opp_hp: hp2, round: state.round });
-  if (s2) s2.emit('pvp:round_result', { match_id: matchId, your_move: move2, opp_move: move1, your_hp: hp2, opp_hp: hp1, round: state.round });
-  state.round++;
-
-  // Both dead → reset to 3 HP each (simultaneous kill)
-  if (hp1 <= 0 && hp2 <= 0) {
-    state.hp[player1.userId] = 3;
-    state.hp[player2.userId] = 3;
-    match.move1 = null; match.move2 = null;
-    setTimeout(() => startTurnTimer(io, match), 1500);
-    return;
+  state.hp[p1] -= dmg1;
+  state.hp[p2] -= dmg2;
+  for (const [id, mv] of [[p1, move1], [p2, move2]]) {
+    if (mv === 'charge') state.charge[id] = 1;
+    if (mv === 'attack') state.charge[id] = 0;
+    state.defends[id] = mv === 'defend' ? state.defends[id] + 1 : 0;
   }
 
+  const round = state.round;
+  state.round++;
+  // sudden death kicks in for the next round
+  let sudden = false;
+  if (state.round === DUEL_SUDDEN_ROUND && state.hp[p1] > 0 && state.hp[p2] > 0) {
+    state.hp[p1] = Math.min(state.hp[p1], 1); state.hp[p2] = Math.min(state.hp[p2], 1); sudden = true;
+  }
+
+  const hit = { [p1]: dmg1 > 0, [p2]: dmg2 > 0 };
+  const view = (me, opp, myMove, oppMove, blocked, oppBlocked) => ({
+    match_id: matchId, round, your_move: myMove, opp_move: oppMove,
+    your_hp: state.hp[me], opp_hp: state.hp[opp],
+    your_charge: state.charge[me], opp_charge: state.charge[opp],
+    your_defends: state.defends[me], opp_defends: state.defends[opp],
+    clash, you_blocked: blocked, opp_blocked: oppBlocked, you_hit: hit[me], opp_hit: hit[opp], sudden_death: sudden,
+    next_round: state.round, turn_ms: DUEL_TURN_MS,
+  });
+  const s1 = userSocket.get(p1);
+  const s2 = userSocket.get(p2);
+  if (s1) s1.emit('pvp:round_result', view(p1, p2, move1, move2, blocked1, blocked2));
+  if (s2) s2.emit('pvp:round_result', view(p2, p1, move2, move1, blocked2, blocked1));
+
+  const hp1 = state.hp[p1], hp2 = state.hp[p2];
   if (hp1 <= 0 || hp2 <= 0) {
-    const winnerId = hp2 <= 0 ? player1.userId : player2.userId;
+    const winnerId = hp2 <= 0 ? p1 : p2; // both can't drop on the same round under these rules
     return setTimeout(() => awardWinner(io, match, winnerId), 1500);
+  }
+  if (state.round > DUEL_HARD_CAP) {
+    const { deriveFloat } = require('../games/provably-fair');
+    return setTimeout(() => awardWinner(io, match, deriveFloat(match.seed, DUEL_HARD_CAP) < 0.5 ? p1 : p2), 1500);
   }
 
   match.move1 = null; match.move2 = null;
-  startTurnTimer(io, match);
+  // give the clients time to play the round's animation before the clock starts
+  setTimeout(() => { if (match.phase === 'active') startTurnTimer(io, match); }, 1400);
 }
 
 // ── Uno ───────────────────────────────────────────────────────────────────────
@@ -554,6 +604,9 @@ function canPlay(card, topCard, currentColor) {
 }
 
 function getPlayerState(match, userId) {
+  if (match.game === 'duels') {
+    return { hp: DUEL_HP, turn_ms: DUEL_TURN_MS, max_defends: DUEL_MAX_DEFENDS, sudden_round: DUEL_SUDDEN_ROUND };
+  }
   if (match.game !== 'uno') return {};
   const { state, player1, player2 } = match;
   const oppId = player1.userId === userId ? player2.userId : player1.userId;

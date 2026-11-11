@@ -25,7 +25,7 @@ export const GAMES = [
   { id: 'highlow',   name: 'Higher or Lower',     type: 'pvp',  route: 'matchmaking-highlow',  scene: 'highlow', icon: '🔢',
     desc: 'Whose number wins?',                    rules: 'Both players get a hidden number. Higher number takes the pot.' },
   { id: 'duels',     name: 'Duels',               type: 'pvp',  route: 'matchmaking-duels',    scene: 'duels', icon: '⚔️',
-    desc: 'Bluff. Attack. Survive.',               rules: 'Each round pick attack, defend or special. Last one standing wins the pot.' },
+    desc: 'Charge. Block. Shoot.',                  rules: 'Charge to load your shot, attack to hit someone who is charging, defend to block. 3 lives — last one standing wins the pot.' },
 ];
 export const GAME_BY_ID = Object.fromEntries(GAMES.map((g) => [g.id, g]));
 // history rows sometimes use 'higherlow' for the same game
