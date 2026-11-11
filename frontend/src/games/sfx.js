@@ -42,5 +42,9 @@ export const sfx = {
   push() { tone(523, 0.12, { vol: 0.03 }); },
   blackjack() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.26, { at: i * 0.07, vol: 0.05 })); vib([30, 40, 60]); },
   side() { [784, 1175].forEach((f, i) => tone(f, 0.16, { at: i * 0.07, vol: 0.05 })); },
+  roll(k = 1) { noise(0.05, { from: 1800, to: 900, vol: 0.025 * k }); },
+  clack() { tone(1900, 0.03, { type: 'square', vol: 0.03 }); noise(0.05, { from: 4000, to: 2000, vol: 0.06 }); },
+  tick(k = 1) { tone(1400 + Math.random() * 500, 0.02, { type: 'square', vol: 0.02 * k }); },
+  settle() { tone(220, 0.12, { type: 'sine', vol: 0.08 }); noise(0.06, { from: 1500, to: 600, vol: 0.05 }); },
   streak() { [880, 1109, 1319].forEach((f, i) => tone(f, 0.12, { at: i * 0.05, vol: 0.04, type: 'square' })); },
 };

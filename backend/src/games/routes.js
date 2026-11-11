@@ -55,6 +55,17 @@ router.post('/roulette/spin', requireAuth, async (req, res) => {
   }
 });
 
+// ── GET /games/roulette/recent ────────────────────────────────────────────────
+// Last 100 numbers spun on the site, newest first — no user info.
+router.get('/roulette/recent', requireAuth, async (_req, res) => {
+  try {
+    return res.json({ numbers: await roulette.getRecent() });
+  } catch (e) {
+    console.error('[roulette/recent]', e.message);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ── POST /games/plinko/drop ───────────────────────────────────────────────────
 router.post('/plinko/drop', requireAuth, async (req, res) => {
   try {
