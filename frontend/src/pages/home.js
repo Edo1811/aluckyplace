@@ -9,7 +9,7 @@ import { GAME_BY_ID, gameName } from '../ui/games-meta.js';
 // Mirrors backend/src/economy/daily.js — 500 × 1.7^(day-1), rounded to 10, capped at day 10
 const REWARDS = Array.from({ length: 10 }, (_, i) => Math.round(500 * 1.7 ** i / 10) * 10);
 const rewardFor = (day) => REWARDS[Math.min(Math.max(day, 1), REWARDS.length) - 1];
-const pipLabel = (r) => r >= 1000 ? `${+(r / 1000).toFixed(1)}k` : `${r}`;
+const pipLabel = (r) => r >= 10000 ? `${Math.round(r / 1000)}k` : r >= 1000 ? `${+(r / 1000).toFixed(1)}k` : `${r}`;
 
 const CSS = `
 .app{--ac:#10b981;--acr:16,185,129}
@@ -43,14 +43,14 @@ const CSS = `
 .d-s{font-size:11.5px;color:rgba(255,255,255,.34);margin-top:3px}
 .d-amt{font-size:22px;font-weight:700;color:var(--ac);white-space:nowrap}
 .d-amt small{font-size:11px;color:rgba(255,255,255,.3);font-weight:400}
-.track{display:grid;grid-template-columns:repeat(9,1fr);gap:4px;margin:16px 0 14px}
+.track{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:4px;margin:16px 0 14px}
 .pip{display:flex;flex-direction:column;align-items:center;gap:6px}
 .pip i{width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,.07);position:relative;overflow:hidden}
 .pip.done i{background:var(--ac)}
 .pip.today i{background:rgba(var(--acr),.28)}
 .pip.today i::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);animation:pipShine 1.8s ease-in-out infinite}
 @keyframes pipShine{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
-.pip span{font-size:9px;color:rgba(255,255,255,.24)}
+.pip span{font-size:9px;color:rgba(255,255,255,.24);white-space:nowrap;letter-spacing:-.02em}
 .pip.today span{color:var(--ac);font-weight:700}
 .pip.done span{color:rgba(255,255,255,.45)}
 .claim{width:100%;padding:15px;border-radius:14px;border:none;background:var(--ac);color:#03150e;font-size:15px;font-weight:700;cursor:pointer}
