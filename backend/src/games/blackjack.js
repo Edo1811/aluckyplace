@@ -62,6 +62,53 @@ function dealerShouldHit(hand) {
   return false;
 }
 
+// ── Side bets ─────────────────────────────────────────────────────────────────
+// Paid on the opening cards, settled at the deal. Multipliers are "to 1".
+const RED = new Set(['♥', '♦']);
+const PAIR_PAYS = { perfect: 25, colored: 12, mixed: 6 };
+const T3_PAYS   = { suited_trips: 100, straight_flush: 40, trips: 30, straight: 10, flush: 5 };
+
+function perfectPairs(hand) {
+  const [a, b] = hand;
+  if (a.rank !== b.rank) return null;
+  if (a.suit === b.suit) return 'perfect';
+  if (RED.has(a.suit) === RED.has(b.suit)) return 'colored';
+  return 'mixed';
+}
+
+function twentyOnePlusThree(cards) {
+  const flush = cards.every((c) => c.suit === cards[0].suit);
+  const trips = cards.every((c) => c.rank === cards[0].rank);
+  const idx = cards.map((c) => RANKS.indexOf(c.rank)).sort((x, y) => x - y);
+  const straight = new Set(idx).size === 3 && (idx[2] - idx[0] === 2 || (idx[0] === 0 && idx[1] === 11 && idx[2] === 12)); // Q-K-A
+  if (trips && flush) return 'suited_trips';
+  if (straight && flush) return 'straight_flush';
+  if (trips) return 'trips';
+  if (straight) return 'straight';
+  if (flush) return 'flush';
+  return null;
+}
+
+/** Side bet amounts from the client: 0 = off, otherwise 10 CC up to the main bet. */
+function cleanSide(v, bet) {
+  const n = Math.floor(Number(v) || 0);
+  if (n <= 0) return 0;
+  return Math.max(10, Math.min(n, bet));
+}
+
+function settleSides(side, playerHand, dealerUp) {
+  const out = [];
+  if (side.pp) {
+    const hit = perfectPairs(playerHand);
+    out.push({ key: 'pp', name: 'Perfect Pairs', bet: side.pp, hit, payout: hit ? side.pp * (PAIR_PAYS[hit] + 1) : 0 });
+  }
+  if (side.t3) {
+    const hit = twentyOnePlusThree([playerHand[0], playerHand[1], dealerUp]);
+    out.push({ key: 't3', name: '21+3', bet: side.t3, hit, payout: hit ? side.t3 * (T3_PAYS[hit] + 1) : 0 });
+  }
+  return out;
+}
+
 function sanitizeHand(hand, hideSecond = false) {
   if (!hideSecond) return hand;
   return [hand[0], { rank: '?', suit: '?' }];
@@ -70,7 +117,7 @@ function sanitizeHand(hand, hideSecond = false) {
 // ── Register handlers ─────────────────────────────────────────────────────────
 function registerBlackjackHandlers(io, socket) {
 
-  socket.on('blackjack:deal', async ({ bet }) => {
+  socket.on('blackjack:deal', async ({ bet, side } = {}) => {
     if (!socket.user) return;
     const userId = socket.user.userId;
     bet = Math.floor(Number(bet));
@@ -78,18 +125,15 @@ function registerBlackjackHandlers(io, socket) {
     if (activeGames.has(userId)) {
       // Unfinished hand from before a page leave — resume it.
       const g = activeGames.get(userId);
-      socket.emit('blackjack:resume', { bet: g.bet, staked: g.handBets.reduce((a, b) => a + b, 0) });
+      socket.emit('blackjack:resume', { bet: g.bet, staked: g.handBets.reduce((a, b) => a + b, 0), side_bet: g.sideBet });
       return emitState(socket, g);
     }
 
     try {
-      // Deduct bet
-      const deduct = await query(
-        `UPDATE users SET cc_balance = cc_balance - $1 WHERE id = $2 AND cc_balance >= $1 RETURNING cc_balance`,
-        [bet, userId]
-      );
-      if (deduct.rows.length === 0) return socket.emit('blackjack:error', { message: 'Insufficient balance' });
+      const sides = { pp: cleanSide(side && side.pp, bet), t3: cleanSide(side && side.t3, bet) };
+      const sideBet = sides.pp + sides.t3;
 
+      // Shuffle first so side bets can be settled in the same balance update as the stake.
       const { seed, hash } = generateSeed();
       const nonce  = await nextNonce(userId);
       const floats = deriveFloats(seed, nonce, 312); // 6 decks = 312 cards
@@ -101,10 +145,21 @@ function registerBlackjackHandlers(io, socket) {
       const playerHand = [draw(), draw()];
       const dealerHand = [draw(), draw()];
 
+      const sideResults = settleSides(sides, playerHand, dealerHand[0]);
+      const sidePayout  = sideResults.reduce((a, s) => a + s.payout, 0);
+
+      // Deduct stake + side bets, credit any side bet win, all in one guarded update
+      const deduct = await query(
+        `UPDATE users SET cc_balance = cc_balance - $1 + $3 WHERE id = $2 AND cc_balance >= $1 RETURNING cc_balance`,
+        [bet + sideBet, userId, sidePayout]
+      );
+      if (deduct.rows.length === 0) return socket.emit('blackjack:error', { message: 'Insufficient balance' });
+
       const gameData = {
         userId, bet, seed, hash, nonce, shoe, idx,
         playerHands: [playerHand],
         handBets: [bet],      // stake per hand (splits add hands, doubles double one hand)
+        sideBet, sidePayout, sideResults,
         activeHandIdx: 0,
         splitCount: 0,
         dealerHand,
@@ -136,6 +191,7 @@ function registerBlackjackHandlers(io, socket) {
         hash,
         can_double:   true,
         can_split:    playerHand[0].rank === playerHand[1].rank,
+        side_results: sideResults,
         cc_balance:   deduct.rows[0].cc_balance,
       });
 
@@ -232,6 +288,7 @@ function emitState(socket, game) {
     phase:        'player',
     can_double:   hand.length === 2,
     can_split:    hand.length === 2 && hand[0].rank === hand[1].rank && game.splitCount < 2,
+    side_results: game.sideResults || [],
     cc_balance:   game.cc_balance,
   });
 }
@@ -239,7 +296,9 @@ function emitState(socket, game) {
 async function settleGame(socket, game, reason) {
   const { userId, seed, hash, nonce, dealerHand, playerHands } = game;
   const handBets = game.handBets || playerHands.map(() => game.bet);
-  const totalBet = handBets.reduce((a, b) => a + b, 0);
+  const sideBet = game.sideBet || 0, sidePayout = game.sidePayout || 0;
+  // Side bets were already settled into the balance at the deal; they only count toward the totals here.
+  const totalBet = handBets.reduce((a, b) => a + b, 0) + sideBet;
   activeGames.delete(userId);
 
   // Dealer draws
@@ -275,21 +334,27 @@ async function settleGame(socket, game, reason) {
     return { hand, total, outcome, payout, bet };
   });
 
+  const handPayout = totalPayout;
+  totalPayout += sidePayout;
+
   const client = await getClient();
   try {
     await client.query('BEGIN');
     let finalBalance = game.cc_balance;
-    if (totalPayout > 0) {
+    if (handPayout > 0) {
       const credit = await client.query(
         `UPDATE users SET cc_balance = cc_balance + $1 WHERE id = $2 RETURNING cc_balance`,
-        [totalPayout, userId]
+        [handPayout, userId]
       );
       finalBalance = credit.rows[0].cc_balance;
     }
     await recordResult(client, {
       userId, game: 'blackjack', betAmount: totalBet, payoutAmount: totalPayout,
       seed, hash, nonce,
-      extra: { results: results.map(r => ({ outcome: r.outcome, total: r.total, payout: r.payout })), dealer_total: dealerTotal },
+      extra: {
+        results: results.map(r => ({ outcome: r.outcome, total: r.total, payout: r.payout })), dealer_total: dealerTotal,
+        ...(game.sideResults && game.sideResults.length ? { side_bets: game.sideResults.map(s => ({ key: s.key, bet: s.bet, hit: s.hit, payout: s.payout })) } : {}),
+      },
     });
     await recordSoloResult(client, {
       userId, game: 'blackjack', betAmount: totalBet, payoutAmount: totalPayout, ccBalanceAfter: finalBalance,
@@ -304,6 +369,7 @@ async function settleGame(socket, game, reason) {
       total_payout: totalPayout,
       total_bet:    totalBet,
       net:          totalPayout - totalBet,
+      side_results: game.sideResults || [],
       seed, cc_balance: finalBalance,
     });
 
