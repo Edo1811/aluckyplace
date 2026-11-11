@@ -403,8 +403,10 @@ export const frameHasPart = (key, part) => !!(FRAME_BY_KEY[key] && FRAME_BY_KEY[
 export const hasWinFx = (key) => !!FX_BY_KEY[key];
 export const hasBackdrop = (key) => !!BG_BY_KEY[key];
 
-/** A payout of at least this many times the bet plays the equipped win effect. */
-export const BIG_WIN_MULTIPLIER = 10;
+/** The equipped win effect plays when a win pays at least this many times the bet... */
+export const BIG_WIN_MULTIPLIER = 2;
+/** ...or when the winnings (net, in CC) reach this amount, whatever the multiplier. */
+export const BIG_WIN_AMOUNT = 10000;
 
 /* ================= markup helpers ================= */
 /** Looping win-effect preview. width in px (height follows the 300x170 design box). */

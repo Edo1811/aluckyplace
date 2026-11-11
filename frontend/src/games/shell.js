@@ -4,14 +4,16 @@ import './shell.css';
 import { store, updateBalance } from '../store.js';
 import { $, fmt, esc, amountOf, balanceHTML, bindBalance, emitBalance, onLeave } from '../ui/core.js';
 import { api } from '../api.js';
-import { myEquipped, playWinFx, hasWinFx, BIG_WIN_MULTIPLIER } from '../cosmeticFx.js';
+import { myEquipped, playWinFx, hasWinFx, BIG_WIN_MULTIPLIER, BIG_WIN_AMOUNT } from '../cosmeticFx.js';
 
 const equipped = () => myEquipped(() => api.get(`/profile/${encodeURIComponent(store.user?.username || '')}`).then((p) => p.equipped));
 
-/** Plays the player's equipped win effect if this result paid BIG_WIN_MULTIPLIER× the bet or more.
- *  Session games (slots, plinko) call it per spin/ball and pass bet: 0 to result(). */
+/** Plays the player's equipped win effect if this result paid BIG_WIN_MULTIPLIER× the bet or more,
+ *  or won BIG_WIN_AMOUNT CC or more. Session games (slots, plinko) call it per spin/ball and pass
+ *  bet: 0 to result() so the session total doesn't trigger it a second time. */
 export function maybeWinFx(net, bet) {
-  if (!(net > 0) || !(bet > 0) || net + bet < BIG_WIN_MULTIPLIER * bet) return;
+  if (!(net > 0) || !(bet > 0)) return;
+  if (net < BIG_WIN_AMOUNT && net + bet < BIG_WIN_MULTIPLIER * bet) return;
   equipped().then((eq) => { const fx = eq && eq.win_effect; if (fx && hasWinFx(fx.preview_key)) playWinFx(fx.preview_key, net); });
 }
 

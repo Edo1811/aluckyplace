@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { store, updateBalance } from '../store.js';
 import { renderAvatarFrame, renderCosmeticPreview, CATEGORY_LABELS } from '../cosmeticPreview.js';
-import { fxPreviewHTML, backdropPreviewHTML, backdropFillHTML, BIG_WIN_MULTIPLIER } from '../cosmeticFx.js';
+import { fxPreviewHTML, backdropPreviewHTML, backdropFillHTML, BIG_WIN_MULTIPLIER, BIG_WIN_AMOUNT } from '../cosmeticFx.js';
 import { createPackOpener } from '../packOpening.js';
 import {
   $, fmt, esc, hexA, toast, dockHTML, bindNav, balanceHTML, bindBalance, emitBalance, amountOf,
@@ -191,7 +191,7 @@ function preview(it, big) {
 }
 function tryOn(it) {
   if (it.category === 'win_effect') {
-    return `${fxPreviewHTML(it.preview_key, 270)}<div style="font-size:12px;color:rgba(255,255,255,.45);margin-top:6px">Plays full screen when you win ${BIG_WIN_MULTIPLIER}× your bet or more,<br>and flashes next to your name in the live ticker.</div>`;
+    return `${fxPreviewHTML(it.preview_key, 270)}<div style="font-size:12px;color:rgba(255,255,255,.45);margin-top:6px">Plays full screen when you win ${BIG_WIN_MULTIPLIER}× your bet or ${fmt(BIG_WIN_AMOUNT)} CC or more,<br>and flashes next to your name in the live ticker.</div>`;
   }
   if (it.category === 'profile_backdrop') {
     const cur = { ...(meCos || {}) }, title = meCos?.status_title?.name || '';
