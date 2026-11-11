@@ -4,7 +4,7 @@ import './shell.css';
 import { store, updateBalance } from '../store.js';
 import { $, fmt, esc, amountOf, balanceHTML, bindBalance, emitBalance, onLeave } from '../ui/core.js';
 import { api } from '../api.js';
-import { myEquipped, playWinFx, hasWinFx, BIG_WIN_MULTIPLIER, BIG_WIN_AMOUNT } from '../cosmeticFx.js';
+import { myEquipped, playWinFx, hasWinFx, isBigWin } from '../cosmeticFx.js';
 
 const equipped = () => myEquipped(() => api.get(`/profile/${encodeURIComponent(store.user?.username || '')}`).then((p) => p.equipped));
 
@@ -12,8 +12,7 @@ const equipped = () => myEquipped(() => api.get(`/profile/${encodeURIComponent(s
  *  or won BIG_WIN_AMOUNT CC or more. Session games (slots, plinko) call it per spin/ball and pass
  *  bet: 0 to result() so the session total doesn't trigger it a second time. */
 export function maybeWinFx(net, bet) {
-  if (!(net > 0) || !(bet > 0)) return;
-  if (net < BIG_WIN_AMOUNT && net + bet < BIG_WIN_MULTIPLIER * bet) return;
+  if (!isBigWin(net, bet)) return;
   equipped().then((eq) => { const fx = eq && eq.win_effect; if (fx && hasWinFx(fx.preview_key)) playWinFx(fx.preview_key, net); });
 }
 
@@ -103,7 +102,6 @@ export function gameShell(app, opts) {
      *  bet defaults to the stake placed on the bet screen (used for the big-win effect). */
     result({ net, sub, seed, again, change, againLabel = 'Play again', changeLabel = 'Change bet', bet = lastBet[opts.id] }) {
       const win = net > 0;
-      maybeWinFx(Number(net), Number(bet));
       $('resBadge').textContent = win ? 'You won' : net === 0 ? 'Break even' : 'You lost';
       $('resAmt').textContent = `${net > 0 ? '+' : net < 0 ? '−' : ''}${fmt(Math.abs(net))} CC`;
       $('resAmt').className = `res-amt ${win ? 'win' : net < 0 ? 'lose' : ''}`;
@@ -112,7 +110,18 @@ export function gameShell(app, opts) {
       $('resAgain').textContent = againLabel; $('resChange').textContent = changeLabel;
       $('resAgain').onclick = again; $('resChange').onclick = change;
       $('resChange').style.display = change ? '' : 'none';
+      $('resAmt').removeAttribute('style');
       show('scRes');
+      // Big win with a win effect equipped: the effect skins this screen and
+      // brings the amount in itself, so hide it until the effect takes over.
+      if (isBigWin(Number(net), Number(bet))) {
+        const amt = $('resAmt'); amt.classList.add('cfx-wait');
+        equipped().then((eq) => {
+          const fx = eq && eq.win_effect;
+          if (fx && hasWinFx(fx.preview_key) && amt.isConnected) playWinFx(fx.preview_key, Number(net), { anchor: amt, host: $('scRes') });
+          else amt.classList.remove('cfx-wait');
+        });
+      }
     },
   };
   return shell;

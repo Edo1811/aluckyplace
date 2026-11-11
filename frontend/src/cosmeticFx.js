@@ -16,12 +16,20 @@ const H = (i) => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x 
 const TAU = Math.PI * 2, P = 3.2;
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 let FXT = '+48,200';
+// "Skin" mode (playWinFx with an anchor): the effect draws no number of its
+// own; the first text call records when/how the number should appear so the
+// real result amount can be styled and timed to match.
+let NO_TEXT = false, CAPTURE = null;
+function captureText(o) {
+  if (CAPTURE && !CAPTURE.done) Object.assign(CAPTURE, { done: true, at: o.at ?? 0.35, g: o.g || null, col: o.col || null, glow: o.glow || null, slam: !!o.scale });
+}
 
 /* eslint-disable */
 
 /* ---------- shared drawing helpers ---------- */
 function popScale(k){if(k<0)return 0;if(k<.12)return .5+k/.12*.7;if(k<.26)return 1.2-(k-.12)/.14*.2;return 1}
 function winText(x,w,h,u,o={}){
+  if(NO_TEXT){captureText(o);return}
   const at=o.at??.35,k=u-at;if(k<0)return;
   const s=o.scale?o.scale(k):popScale(k),a=u>P-.45?clamp((P-u)/.45):1;
   x.save();x.globalAlpha=a;x.translate(w/2+(o.dx||0),(o.y??h/2)+(o.dy||0));x.scale(s,s);
@@ -51,7 +59,7 @@ function coin3d(x,px,py,r,ang,a=1){const s=Math.cos(ang),rx=Math.max(.8,r*Math.a
   x.strokeStyle='rgba(255,236,170,.85)';x.lineWidth=.8;x.beginPath();x.ellipse(0,0,rx*.72,r*.72,0,0,TAU);x.stroke();
   if(rx>r*.5){x.fillStyle='rgba(120,80,10,.55)';x.font=`800 ${r*.95}px Inter`;x.textAlign='center';x.textBaseline='middle';x.save();x.scale(rx/r,1);x.fillText('$',0,r*.05);x.restore()}
   if(s>.8){x.fillStyle='rgba(255,255,255,.9)';x.beginPath();x.ellipse(-rx*.35,-r*.42,rx*.2,r*.12,-.6,0,TAU);x.fill()}x.restore()}
-function premiumText(x,w,h,u,o){const at=o.at??.35,k=u-at;if(k<0)return;const s=o.scale?o.scale(k):popScale(k),a=u>P-.45?clamp((P-u)/.45):1,sz=o.size||34,txt=o.text||FXT;
+function premiumText(x,w,h,u,o){if(NO_TEXT){captureText(o);return}const at=o.at??.35,k=u-at;if(k<0)return;const s=o.scale?o.scale(k):popScale(k),a=u>P-.45?clamp((P-u)/.45):1,sz=o.size||34,txt=o.text||FXT;
   x.save();x.globalAlpha=a;x.translate(w/2+(o.dx||0),(o.y??h/2)+(o.dy||0));x.scale(s*(o.sx||1),s);x.font=`800 ${sz}px Inter`;x.textAlign='center';x.textBaseline='middle';x.lineJoin='round';
   x.lineWidth=7;x.strokeStyle='rgba(0,0,0,.7)';x.strokeText(txt,0,3);
   const gr=x.createLinearGradient(0,-sz*.5,0,sz*.5);gr.addColorStop(0,o.g[0]);gr.addColorStop(.55,o.g[1]);gr.addColorStop(1,o.g[2]);
@@ -88,7 +96,7 @@ const FX=[
     x.save();x.scale(1,sq);x.setLineDash([3.6,3.6]);x.lineWidth=3;x.strokeStyle=i%5==4?'#dc2626':'#f8fafc';x.beginPath();x.arc(0,0,8.4,0,TAU);x.stroke();x.setLineDash([]);x.lineWidth=.8;x.strokeStyle='rgba(255,255,255,.5)';x.beginPath();x.arc(0,0,5.5,0,TAU);x.stroke();x.restore();
     const hl=x.createLinearGradient(0,-r*sq,0,r*sq);hl.addColorStop(0,'rgba(255,255,255,.35)');hl.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=hl;x.beginPath();x.ellipse(0,0,r,r*sq,0,0,TAU);x.fill();x.restore()});
   premiumText(x,w,h,u,{at:.5,y:h*.42,g:['#e8f1ff','#7fb0ff','#1e40af'],glow:'rgba(59,130,246,.85)'})}},
-{n:'777',r:'Rare',k:'fx_triple_seven',d:'Three reels spin and lock on sevens one after another.',f(x,t,w,h){const u=t%P,S=['7','BAR','$','♦','♣','★'],bw=58,bh=70,gap=10,x0=w/2-(bw*3+gap*2)/2,y0=h/2-bh/2-14;
+{n:'777',r:'Rare',k:'fx_triple_seven',d:'Three reels spin and lock on sevens one after another.',f(x,t,w,h){const u=t%P,S=['7','BAR','$','♦','♣','★'],bw=58,bh=70,gap=10,x0=w/2-(bw*3+gap*2)/2,y0=NO_TEXT?h/2-bh-56:h/2-bh/2-14;
   const all=u>1.45;
   for(let j=0;j<3;j++){const bx=x0+j*(bw+gap),stop=.55+j*.38;x.save();x.beginPath();x.roundRect(bx,y0,bw,bh,10);x.fillStyle='#141414';x.fill();
     x.lineWidth=2;x.strokeStyle=all&&Math.floor(u*8)%2?'#f5df98':'#2a2a2a';x.stroke();x.clip();x.font='800 26px Inter';x.textAlign='center';x.textBaseline='middle';
@@ -192,7 +200,8 @@ const FX=[
 {n:'Jackpot.exe',r:'Exotic',k:'fx_jackpot_exe',d:'The screen glitches out as if the casino just crashed from paying you.',f(x,t,w,h,o){const u=t%P,f=Math.floor(t*18);
   x.font='500 11px "JetBrains Mono"';x.textAlign='left';for(let i=0;i<26;i++){const px=(i/26)*w,sp=40+H(i)*80;for(let j=0;j<8;j++){const py=((H(i+j*31)*h)+t*sp)%h;x.globalAlpha=.08+H(i*j+f%7)*.12;x.fillStyle='#10b981';x.fillText(H(i*7+j+Math.floor(t*4))>.5?'1':'0',px,py)}}
   x.globalAlpha=1;x.fillStyle='rgba(255,255,255,.035)';for(let y=0;y<h;y+=3)x.fillRect(0,y,w,1);
-  if(u>.3){const a=u>P-.45?clamp((P-u)/.45):1,gl=H(f)<.35||u<.6;x.save();x.globalAlpha=a;x.font='800 32px Inter';x.textAlign='center';x.textBaseline='middle';x.globalCompositeOperation='lighter';
+  if(NO_TEXT)captureText({at:.3});
+  if(u>.3&&!NO_TEXT){const a=u>P-.45?clamp((P-u)/.45):1,gl=H(f)<.35||u<.6;x.save();x.globalAlpha=a;x.font='800 32px Inter';x.textAlign='center';x.textBaseline='middle';x.globalCompositeOperation='lighter';
     const dx=gl?(H(f+1)-.5)*10:1.5;x.fillStyle='#ff0040';x.fillText(FXT,w/2-dx,h/2);x.fillStyle='#00e5ff';x.fillText(FXT,w/2+dx,h/2+(gl?1:0));x.globalCompositeOperation='source-over';x.fillStyle='#fff';x.fillText(FXT,w/2,h/2);
     x.font='500 11px "JetBrains Mono"';x.fillStyle='#10b981';x.fillText(Math.floor(t*3)%2?'> JACKPOT.EXE':'> JACKPOT.EXE_',w/2,h/2-30);x.restore()}
   if(H(f+5)<.4&&o&&o.c){const cw=o.c.width,ch=o.c.height;x.save();x.setTransform(1,0,0,1,0,0);for(let i=0;i<3;i++){const sy=H(f+i*9)*ch,sh=(4+H(f+i*3)*14)/h*ch*.6,dx=(H(f+i*5)-.5)*30/w*cw*.4;x.drawImage(o.c,0,sy,cw,sh,dx,sy,cw,sh)}x.restore()}}}
@@ -489,13 +498,61 @@ export function myEquipped(fetcher) {
   return eqLoading;
 }
 
-/* ================= full-screen win effect ================= */
+/* ================= win effect playback ================= */
+// How the real result amount looks when an effect skins the win screen.
+// Defaults come from the effect's own number (gradient/colour, glow, slam);
+// these override the ones that draw their number in a special way.
+const AMOUNT_LOOK = {
+  fx_triple_seven: { g: ['#fffbe6', '#f5c84a', '#9a6a08'], glow: 'rgba(239,68,68,.85)' },
+  fx_gold_rain: { g: ['#fffbe6', '#e8c24a', '#8a6410'], glow: 'rgba(212,175,55,.9)', cls: 'cfx-shine' },
+  fx_black_hole: { cls: 'cfx-rainbow', glow: 'rgba(139,92,246,.95)' },
+  fx_jackpot_exe: { cls: 'cfx-glitch' },
+};
+const AMOUNT_CSS = `
+.cfx-wait{opacity:0}
+.cfx-amt{display:inline-block;will-change:transform}
+.cfx-grad{background:linear-gradient(180deg,var(--g0),var(--g1) 55%,var(--g2));-webkit-background-clip:text;background-clip:text;color:transparent!important;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 14px var(--glow)) drop-shadow(0 3px 0 rgba(0,0,0,.55))}
+.cfx-solid{color:var(--col)!important;text-shadow:0 0 18px var(--glow),0 3px 0 rgba(0,0,0,.55)}
+.cfx-shine{background:linear-gradient(100deg,var(--g2) 20%,var(--g0) 40%,var(--g1) 55%,var(--g2) 80%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent!important;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 14px var(--glow));animation-name:cfxPop,cfxShine!important;animation-duration:.32s,2.4s!important;animation-iteration-count:1,infinite!important;animation-timing-function:ease-out,linear!important}
+.cfx-rainbow{background:linear-gradient(90deg,#f97316,#ec4899,#8b5cf6,#22d3ee,#a3e635,#f97316);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent!important;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 16px var(--glow));animation-name:cfxPop,cfxShine!important;animation-duration:.32s,3s!important;animation-iteration-count:1,infinite!important;animation-timing-function:ease-out,linear!important}
+.cfx-glitch{color:#fff!important;text-shadow:-3px 0 rgba(255,0,64,.85),3px 0 rgba(0,229,255,.85);animation-name:cfxPop,cfxGlitch!important;animation-duration:.32s,1.1s!important;animation-iteration-count:1,infinite!important;animation-timing-function:ease-out,steps(1)!important}
+.cfx-pop{animation:cfxPop .32s ease-out both}
+.cfx-slam{animation:cfxSlam .36s cubic-bezier(.5,0,.75,0) both}
+@keyframes cfxPop{0%{transform:scale(.5);opacity:0}38%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:1}}
+@keyframes cfxSlam{0%{transform:scale(4.2);opacity:0}70%{transform:scale(1);opacity:1}85%{transform:scale(.92)}100%{transform:scale(1);opacity:1}}
+@keyframes cfxShine{from{background-position:100% 0}to{background-position:-150% 0}}
+@keyframes cfxGlitch{0%,100%{text-shadow:-3px 0 rgba(255,0,64,.85),3px 0 rgba(0,229,255,.85)}20%{text-shadow:6px 1px rgba(255,0,64,.85),-5px -1px rgba(0,229,255,.85);transform:translateX(-2px)}24%{text-shadow:-2px 0 rgba(255,0,64,.85),2px 0 rgba(0,229,255,.85);transform:none}63%{text-shadow:-8px 0 rgba(255,0,64,.8),7px 1px rgba(0,229,255,.8);transform:skewX(-8deg)}66%{transform:none}}
+`;
+if (typeof document !== 'undefined' && !document.getElementById('cfx-amt-css')) document.head.insertAdjacentHTML('beforeend', `<style id="cfx-amt-css">${AMOUNT_CSS}</style>`);
+
+/** Styles + times the real amount element to match effect `key` (cap = recorded text call). */
+function skinAmount(el, key, cap) {
+  const look = { ...(cap || {}), ...(AMOUNT_LOOK[key] || {}) }, at = Math.max(0, look.at ?? 0.35);
+  el.classList.add('cfx-amt');
+  if (look.g) { el.style.setProperty('--g0', look.g[0]); el.style.setProperty('--g1', look.g[1]); el.style.setProperty('--g2', look.g[2]); }
+  el.style.setProperty('--glow', look.glow || fxColor(key)); el.style.setProperty('--col', look.col || fxColor(key));
+  el.classList.add(look.cls || (look.g ? 'cfx-grad' : 'cfx-solid'), look.slam ? 'cfx-slam' : 'cfx-pop');
+  if (look.cls) el.style.animationDelay = `${at}s, ${at}s`; else el.style.animationDelay = `${at}s`;
+  el.classList.remove('cfx-wait');
+}
+/** Big-win check shared by the game shell: pays BIG_WIN_MULTIPLIER× or wins BIG_WIN_AMOUNT. */
+export const isBigWin = (net, bet) => net > 0 && bet > 0 && (net >= BIG_WIN_AMOUNT || net + bet >= BIG_WIN_MULTIPLIER * bet);
+
 let playing = null;
-/** Plays the win effect `key` once over the whole screen, showing `amount` as the number. */
-export function playWinFx(key, amount) {
+/**
+ * Plays win effect `key` once.
+ * - With opts.anchor + opts.host: "skins" the win screen. The effect draws
+ *   behind host's content, centred on the anchor (the real amount), with no
+ *   number of its own; the anchor is styled and popped in at the effect's
+ *   big moment.
+ * - Without: plays over the whole screen and draws `amount` itself (used
+ *   mid-game, e.g. a slots spin, where no result number is on screen).
+ */
+export function playWinFx(key, amount, opts = {}) {
   const fx = FX_BY_KEY[key];
   if (!fx || typeof document === 'undefined') return;
   if (playing) playing.remove();
+  if (opts.anchor && opts.host) return playSkinned(fx, key, opts.anchor, opts.host);
   const c = document.createElement('canvas');
   c.setAttribute('aria-hidden', 'true');
   c.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:9999';
@@ -521,6 +578,41 @@ export function playWinFx(key, amount) {
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+}
+
+function playSkinned(fx, key, anchor, host) {
+  const c = document.createElement('canvas');
+  c.setAttribute('aria-hidden', 'true');
+  c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0';
+  if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+  [...host.children].forEach((ch) => { if (ch.tagName !== 'CANVAS' && getComputedStyle(ch).position === 'static') { ch.style.position = 'relative'; ch.style.zIndex = '1'; } });
+  host.prepend(c); playing = c;
+  const x = c.getContext('2d'), t0 = performance.now() / 1000;
+  let skinned = false;
+  const frame = (t) => {
+    const hr = host.getBoundingClientRect(), W = hr.width, Hh = hr.height;
+    if (!W || !Hh) return false;
+    const pw = Math.round(W * DPR), ph = Math.round(Hh * DPR);
+    if (c.width !== pw || c.height !== ph) { c.width = pw; c.height = ph; }
+    const ar = anchor.getBoundingClientRect(), ax = ar.left + ar.width / 2 - hr.left, ay = ar.top + ar.height / 2 - hr.top;
+    x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over'; x.shadowBlur = 0; x.setLineDash([]);
+    x.clearRect(0, 0, pw, ph);
+    const s = Math.min(W / 300, Hh / 170, 2.6);
+    x.setTransform(DPR * s, 0, 0, DPR * s, DPR * (ax - W / 2), DPR * (ay - Hh / 2));
+    NO_TEXT = true; CAPTURE = skinned ? null : { done: false };
+    try { fx.f(x, t, W / s, Hh / s, { c }); } finally { NO_TEXT = false; }
+    if (!skinned) { skinned = true; skinAmount(anchor, key, CAPTURE); }
+    CAPTURE = null;
+    return true;
+  };
+  const step = (now) => {
+    const t = now / 1000 - t0;
+    if (t >= P || !c.isConnected || !host.offsetParent) { c.remove(); if (playing === c) playing = null; return; }
+    try { if (!frame(t)) { c.remove(); anchor.classList.remove('cfx-wait'); return; } }
+    catch (e) { console.error('[winfx]', key, e); c.remove(); anchor.classList.remove('cfx-wait'); return; }
+    requestAnimationFrame(step);
+  };
+  step(performance.now());
 }
 
 /* ================= catalog (mirrors backend/src/shop/catalog-round2.js) ================= */
